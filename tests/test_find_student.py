@@ -65,6 +65,11 @@ class Svc:
     def apply_campus(self, q, requested=None):   # campus scoping is a passthrough here
         return q
 
+    self_student_id = None                       # not a student; boundary is a passthrough
+
+    def apply_student(self, q, col="student_id"):
+        return q
+
 
 def _pattern_for(query):
     rec = {}

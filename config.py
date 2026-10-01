@@ -178,6 +178,11 @@ class Settings(BaseSettings):
     # hard-denied — it gets a limited "pending" session that can only call request_access
     # (pick a campus+role → admin approval queue). Off = hard-deny unlisted accounts.
     self_service_access: bool = Field(default=True, alias="MCP_SELF_SERVICE_ACCESS")
+    # Student self-access: when on, a student (roster email) gets a session hard-bounded to
+    # their OWN student_id — same tools, but every query is filtered to self, so one student
+    # can never see another's data. Default OFF (students denied entirely) so this sensitive
+    # activation is a deliberate env flip (MCP_STUDENT_SELF_ACCESS=true), like the RBAC modes.
+    student_self_access: bool = Field(default=False, alias="MCP_STUDENT_SELF_ACCESS")
 
     def gateway_secrets(self) -> list[str]:
         return [s.strip() for s in self.gateway_shared_secret.split(",") if s.strip()]

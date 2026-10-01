@@ -100,6 +100,23 @@ def _role_for(campuses) -> str:
     return "cross_campus" if campuses is None else "faculty"
 
 
+def _student_principal(claims: dict, email: str):
+    """A session hard-bounded to the student's OWN student_id — same tools, but every query is
+    filtered to self, so one student can never read another's data. Returns None when student
+    self-access is disabled or the identity can't be resolved (the caller then denies — never an
+    unbounded student)."""
+    from config import settings
+    if not settings.student_self_access:
+        return None
+    import faculty as registry
+    ident = registry.student_identity(email)
+    if not ident or not ident.get("student_id"):
+        return None
+    return {"name": claims.get("name") or email, "email": email,
+            "campuses": [ident["campus"]] if ident.get("campus") else [],
+            "role": "student", "student_id": ident["student_id"], "can_generate": True}
+
+
 def _pending_principal(claims: dict, email: str) -> dict:
     """A limited session for a verified-but-unprovisioned account: no campus scope and no
     report generation, so every DATA tool denies (campus_scope == []), but request_access
@@ -128,17 +145,18 @@ def _registry_principal(claims: dict, email: str, domain: str, *, quiet: bool = 
         return {"name": override.get("name") or claims.get("name") or email, "email": email,
                 "campuses": camp, "role": _role_for(camp), "can_generate": True}
 
-    # 2. Student-roster deny — a student account never gets faculty MCP access.
-    if registry.is_student(email):
-        return None
-
-    # 3. mcp_faculty DB row — the authoritative allowlist (role + campus scope).
-    #    Writes are service-role only, so it is admin-controlled.
+    # 2. mcp_faculty DB row — the authoritative educator allowlist (role + campus scope).
+    #    Checked BEFORE the student roster so a dual-role account (e.g. a PhD student who is
+    #    also a TA) is treated as the educator they were granted. Writes are service-role only.
     grant = registry.faculty_grant(email)
     if grant is not None:
         return {"name": grant.get("name") or claims.get("name") or email, "email": email,
                 "campuses": grant["campuses"], "role": grant.get("role") or "faculty",
                 "can_generate": grant.get("can_generate", True)}
+
+    # 3. Student roster -> a session hard-bounded to their OWN data (self only), or deny.
+    if registry.is_student(email):
+        return _student_principal(claims, email)
 
     # 4. Domain gate — only the DEFAULT-grant path is domain-restricted. Accept an
     #    allowed domain AND its subdomains; the leading dot blocks look-alikes.
@@ -217,9 +235,13 @@ def principal_from_claims(claims: dict):
         # dual-role TA) and does not trigger the roster lookup.
         import faculty as registry
         if email not in settings.faculty() and registry.is_student(email):
+            # A student NEVER gets the cohort-wide grant. With student self-access on they get a
+            # session hard-bounded to their own student_id (same tools, self only); otherwise deny.
+            sp = _student_principal(claims, email)
             subject = hashlib.sha256(email.encode()).hexdigest()[:12]
-            log.warning("student roster email denied all-access (subject=%s, mode=%s)", subject, mode)
-            return None
+            if sp is None:
+                log.warning("student roster email denied (subject=%s, mode=%s)", subject, mode)
+            return sp
         # OFF / SHADOW: preserve the historical all-campus grant for non-student accounts.
         if mode == "shadow":
             _log_shadow(claims, email, domain)

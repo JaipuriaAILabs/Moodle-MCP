@@ -13,8 +13,13 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-key")
 os.environ["OAUTH_DEFAULT_CAMPUSES"] = "none"
 os.environ["MCP_FACULTY"] = '{"admin@example.com": {"name": "Admin", "campuses": null}}'
 
+import config  # noqa: E402
 import faculty  # noqa: E402
 from security import principal_from_claims  # noqa: E402
+
+# This suite tests the registry + deny logic; student SELF-access is covered in test_rbac_modes.
+# Pin it off so a student roster email deterministically denies here.
+config.settings.student_self_access = False
 
 PASS, FAIL = 0, 0
 
@@ -153,7 +158,7 @@ calls = reset(rows={"prof@example.com": {"name": "P", "campuses": "all", "active
 for _ in range(50):
     principal_from_claims(claims("prof@example.com"))
 check("50 tool calls -> 1 faculty SELECT", calls["faculty"] == 1)
-check("50 tool calls -> 1 roster SELECT", calls["student"] == 1)
+check("granted educator skips the student roster (grant precedence)", calls["student"] == 0)
 calls = reset(rows={})
 for _ in range(50):
     principal_from_claims(claims("stranger@example.com"))

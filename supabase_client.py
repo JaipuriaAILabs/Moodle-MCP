@@ -57,6 +57,19 @@ class MoodleService:
         # every legacy/static-token/all-access principal fully capable).
         self.role = principal.get("role") or ("cross_campus" if campuses is None else "faculty")
         self.can_generate = bool(principal.get("can_generate", True))
+        # Student self-access boundary: when set, EVERY student-identifiable query is hard-filtered
+        # to this student_id, so a student can only ever see their own rows (never another's).
+        self.self_student_id = (
+            str(principal["student_id"]).strip()
+            if principal.get("role") == "student" and principal.get("student_id") else None
+        )
+
+    def apply_student(self, query, col: str = "student_id"):
+        """Bound a query to the caller's own student_id when they are a student; no-op otherwise.
+        This is the per-student boundary — applied in every data helper so no tool can bypass it."""
+        if self.self_student_id is None:
+            return query
+        return query.eq(col, self.self_student_id)
 
     # --- campus scoping ---------------------------------------------------
     def campus_scope(self, requested: str | None):

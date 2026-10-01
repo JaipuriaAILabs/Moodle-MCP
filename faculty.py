@@ -33,6 +33,9 @@ _grants = TTLCache(maxsize=4096, ttl=_GRANT_TTL)
 _stale_grants = TTLCache(maxsize=4096, ttl=3600.0)  # last-known-good, outage grace
 _students = TTLCache(maxsize=8192, ttl=_STUDENT_TTL)
 _stale_students = TTLCache(maxsize=8192, ttl=3600.0)  # last-known-good, outage grace
+_student_ids = TTLCache(maxsize=8192, ttl=_STUDENT_TTL)
+_stale_student_ids = TTLCache(maxsize=8192, ttl=3600.0)
+_ID_MISS = "__no_student__"
 
 
 def _subject(email: str) -> str:
@@ -57,6 +60,41 @@ def _fetch_student_hit(email: str) -> bool:
     rows = (_sb().table("students").select("student_id")
             .ilike("student_email", email).limit(1).execute()).data
     return bool(rows)
+
+
+def _fetch_student_identity(email: str):
+    # Emails repeat across batch snapshots; take the most recent batch's row. student_id is
+    # the stable per-person key that bounds every student query.
+    rows = (_sb().table("students").select("student_id,campus,batch")
+            .ilike("student_email", email).order("batch", desc=True).limit(1).execute()).data
+    return rows[0] if rows else None
+
+
+def student_identity(email: str):
+    """For a student email -> {'student_id','campus'} (the self-scope key), else None.
+    Fail-closed on error (None) WITH last-known-good grace, so a roster-DB blip neither
+    invents access nor needlessly drops a known student mid-session."""
+    email = (email or "").strip().lower()
+    if not email:
+        return None
+    hit = _student_ids.get(email)
+    if hit is not None:
+        return None if hit == _ID_MISS else dict(hit)
+    try:
+        row = _fetch_student_identity(email)
+    except Exception:  # noqa: BLE001
+        stale = _stale_student_ids.get(email)
+        if stale is not None:
+            return dict(stale)
+        log.warning("student identity lookup failed for subject=%s — fail-closed", _subject(email))
+        return None
+    if not row or not row.get("student_id"):
+        _student_ids.set(email, _ID_MISS)
+        return None
+    ident = {"student_id": row["student_id"], "campus": (row.get("campus") or "").strip().lower()}
+    _student_ids.set(email, ident)
+    _stale_student_ids.set(email, ident)
+    return dict(ident)
 
 
 # --- public API ---------------------------------------------------------------

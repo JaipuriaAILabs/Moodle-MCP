@@ -69,7 +69,7 @@ def find_student(svc, student_id):
 
     def _roster():
         q = svc.client.table("students").select("student_id,student_name,campus,batch,section_group")
-        return svc.apply_campus(q, requested=None)
+        return svc.apply_student(svc.apply_campus(q, requested=None))  # student -> self only
 
     # 1) Exact enrolment id — fast and unambiguous.
     rows = (_roster().eq("student_id", query).limit(1).execute()).data or []
@@ -116,10 +116,10 @@ def roster_member(svc, student_id, campus, batch):
     'enrolled but ungraded' apart from 'not enrolled here'."""
     if svc.campus_scope(campus) == []:
         return None
-    rows = (svc.client.table("students")
-            .select("student_id,student_name,campus,batch,section_group")
-            .eq("student_id", student_id).eq("campus", campus).eq("batch", batch)
-            .limit(1).execute()).data or []
+    q = (svc.client.table("students")
+         .select("student_id,student_name,campus,batch,section_group")
+         .eq("student_id", student_id).eq("campus", campus).eq("batch", batch))
+    rows = (svc.apply_student(q).limit(1).execute()).data or []  # student -> self only
     return rows[0] if rows else None
 
 
@@ -151,8 +151,9 @@ def random_gradeable_students(svc, run_id, n=4):
     ones most likely to yield a report (mere roster/marks presence isn't enough; an
     in-progress trimester can be unscored). Shuffled so repeat calls vary."""
     import random
-    rows = (svc.client.table(MARKS).select("student_id")
-            .eq("run_id", run_id).eq("graded", True).limit(8000).execute()).data or []
+    q = (svc.client.table(MARKS).select("student_id")
+         .eq("run_id", run_id).eq("graded", True))
+    rows = (svc.apply_student(q).limit(8000).execute()).data or []  # student -> self only
     ids = list({r["student_id"] for r in rows if r.get("student_id")})
     random.shuffle(ids)
     return ids[:max(1, n)]
@@ -163,8 +164,8 @@ def cached_report_students(svc, run_id, limit=5):
     for them is an instant cache hit, so they're the reliable fallback when a randomly
     sampled student's latest trimester turns out to be unscored."""
     try:
-        rows = (svc.client.table("onepager_narratives").select("student_id")
-                .eq("run_id", run_id).limit(limit).execute()).data or []
+        q = svc.client.table("onepager_narratives").select("student_id").eq("run_id", run_id)
+        rows = (svc.apply_student(q).limit(limit).execute()).data or []  # student -> self only
     except Exception:  # noqa: BLE001 — cache table optional; never block selection
         return []
     return list({r["student_id"] for r in rows if r.get("student_id")})
@@ -193,7 +194,7 @@ def marks_for(svc, run_id, *, student_id=None, course_ids=None):
             q = q.eq("student_id", student_id)
         if course_ids is not None:
             q = q.in_("course_id", course_ids)
-        return (q.range(off, off + lim - 1).execute()).data or []
+        return (svc.apply_student(q).range(off, off + lim - 1).execute()).data or []
     return paged(factory)
 
 
@@ -205,7 +206,7 @@ def attendance_for(svc, run_id, *, student_id=None, course_ids=None):
             q = q.eq("student_id", student_id)
         if course_ids is not None:
             q = q.in_("course_id", course_ids)
-        return (q.range(off, off + lim - 1).execute()).data or []
+        return (svc.apply_student(q).range(off, off + lim - 1).execute()).data or []
     return paged(factory)
 
 
@@ -220,7 +221,7 @@ def attendance_pct(rows) -> tuple:
 def report_rows(svc, *, campus=None, batch=None, trimester=None, cols="*",
                 status="ready", limit=100000):
     q = svc.client.table(CATALOG).select(cols)
-    q = svc.apply_campus(q, requested=campus)
+    q = svc.apply_student(svc.apply_campus(q, requested=campus))  # student -> self only
     if batch:
         q = q.eq("batch", batch)
     if trimester:
@@ -232,7 +233,7 @@ def report_rows(svc, *, campus=None, batch=None, trimester=None, cols="*",
 
 def one_report(svc, student_id, *, campus=None, batch=None, trimester=None, cols="*"):
     q = svc.client.table(CATALOG).select(cols).eq("student_id", student_id)
-    q = svc.apply_campus(q, requested=campus)
+    q = svc.apply_student(svc.apply_campus(q, requested=campus))  # student -> self only
     if batch:
         q = q.eq("batch", batch)
     if trimester:
@@ -256,8 +257,10 @@ _marks_cache = TTLCache(maxsize=8, ttl=300)
 
 
 def scope_marks(svc, run_id, course_ids):
-    """All raw marks rows for a set of courses, cached per (run, course-set)."""
-    key = (run_id, tuple(sorted(course_ids)))
+    """All raw marks rows for a set of courses, cached per (run, course-set, self-scope).
+    The self_student_id is part of the key so a student's self-bounded result is NEVER served
+    from (or to) a faculty cohort cache entry."""
+    key = (run_id, tuple(sorted(course_ids)), svc.self_student_id)
     hit = _marks_cache.get(key)
     if hit is not None:
         return hit
@@ -269,14 +272,15 @@ def scope_marks(svc, run_id, course_ids):
 def cohort_rollup(svc, run_id, courses) -> dict:
     """Per-student rollup from the raw tables for a scope: overall graded-mark %, recorded zeros,
     overall attendance %, and subjects below 75% attendance. Cached per (run, trimester-set)."""
-    key = (run_id, tuple(sorted(courses)))
+    key = (run_id, tuple(sorted(courses)), svc.self_student_id)  # self-scope segregates the cache
     hit = _rollup_cache.get(key)
     if hit is not None:
         return hit
     cids = list(courses)
-    names = {r["student_id"]: r.get("student_name") for r in
-             (svc.client.table("students").select("student_id,student_name")
-              .eq("run_id", run_id).limit(100000).execute()).data or []}
+    names_q = svc.apply_student(svc.client.table("students")  # student -> self only
+                               .select("student_id,student_name").eq("run_id", run_id))
+    names = {r["student_id"]: r.get("student_name")
+             for r in (names_q.limit(100000).execute()).data or []}
     marks = marks_for(svc, run_id, course_ids=cids)
     att = attendance_for(svc, run_id, course_ids=cids)
     agg = defaultdict(lambda: {"obt": 0.0, "max": 0.0, "zeros": [], "att": defaultdict(list)})

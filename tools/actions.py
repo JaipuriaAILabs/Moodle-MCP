@@ -285,6 +285,10 @@ async def _create_impl(svc, p: CreateReportParams) -> dict:
     # so this is a capability cap, not the data boundary.
     if not getattr(svc, "can_generate", True):
         raise PermissionError(MSG_DENIED)
+    # Student self-access: a student can only ever generate THEIR OWN report — force the target
+    # to self, ignoring any other id/name they pass (the data layer also bounds this to self).
+    if getattr(svc, "self_student_id", None):
+        p = p.model_copy(update={"student_id": svc.self_student_id})
     if p.campus and svc.campus_scope(p.campus) == []:
         raise PermissionError(MSG_DENIED)  # explicit campus outside the caller's grant
     if not settings.report_generation_enabled():

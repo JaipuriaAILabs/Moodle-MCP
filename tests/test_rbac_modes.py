@@ -39,6 +39,9 @@ def reset(rows=None, students=()):
     faculty._grants = faculty.TTLCache(maxsize=64, ttl=60)
     faculty._stale_grants = faculty.TTLCache(maxsize=64, ttl=3600)
     faculty._students = faculty.TTLCache(maxsize=64, ttl=60)
+    faculty._stale_students = faculty.TTLCache(maxsize=64, ttl=3600)
+    faculty._student_ids = faculty.TTLCache(maxsize=64, ttl=60)
+    faculty._stale_student_ids = faculty.TTLCache(maxsize=64, ttl=3600)
     calls = {"faculty": 0, "student": 0}
 
     def fetch_row(email):
@@ -49,8 +52,14 @@ def reset(rows=None, students=()):
         calls["student"] += 1
         return email in students
 
+    def fetch_identity(email):
+        if email in students:
+            return {"student_id": "ID_" + email.split("@")[0], "campus": "noida", "batch": "2024-26"}
+        return None
+
     faculty._fetch_faculty_row = fetch_row
     faculty._fetch_student_hit = fetch_student
+    faculty._fetch_student_identity = fetch_identity
     return calls
 
 
@@ -61,11 +70,14 @@ def claims(email, name="Prof X"):
 print("MODE off — historical all-access for Jaipuria, registry NOT consulted")
 set_mode("off")
 calls = reset(rows={"prof@jaipuria.ac.in": {"name": "Prof", "campuses": ["noida"], "active": True}})
+config.settings.student_self_access = True
 p = principal_from_claims(claims("prof@jaipuria.ac.in"))
 check("off: Jaipuria faculty gets all campuses", p is not None and p["campuses"] is None)
 calls = reset(students={"kid@jaipuria.ac.in"})
-check("off: STUDENT denied the all-access grant (no cross-student data)",
-      principal_from_claims(claims("kid@jaipuria.ac.in")) is None)
+ps = principal_from_claims(claims("kid@jaipuria.ac.in"))
+check("off: STUDENT never gets all-access — self-bounded instead",
+      ps is not None and ps["role"] == "student" and ps["campuses"] != None
+      and ps["student_id"] == "ID_kid")
 
 print("MODE shadow — served access unchanged, but registry IS evaluated (for logging)")
 set_mode("shadow")
@@ -74,12 +86,14 @@ p = principal_from_claims(claims("prof@jaipuria.ac.in"))
 check("shadow: faculty served all-access", p is not None and p["campuses"] is None)
 check("shadow: registry consulted (would-be grant computed)", calls["faculty"] >= 1)
 reset(students={"kid@jaipuria.ac.in"})
-check("shadow: STUDENT denied the all-access grant (no cross-student data)",
-      principal_from_claims(claims("kid@jaipuria.ac.in")) is None)
+ps = principal_from_claims(claims("kid@jaipuria.ac.in"))
+check("shadow: STUDENT self-bounded, never all-access",
+      ps is not None and ps["role"] == "student" and ps["campuses"] != None)
 
 print("MODE enforce — mcp_faculty is authoritative")
 set_mode("enforce")
-config.settings.self_service_access = False  # this section tests pure registry resolution (hard deny)
+config.settings.self_service_access = False   # this section tests pure registry resolution (hard deny)
+config.settings.student_self_access = False   # student self-access is covered in its own section below
 
 reset(rows={"noida.prof@jaipuria.ac.in":
             {"name": "N", "campuses": ["noida"], "active": True, "role": "faculty",
@@ -213,6 +227,59 @@ _fake2 = _FakeMCP()
 access.register(_fake2, _get_admin)
 out = asyncio.run(_fake2.tools["list_access_requests"]())
 check("list_access_requests: admin sees the queue", out.get("pending") == [{"email": "x@jaipuria.ac.in"}])
+
+print("Student self-access — same surface, hard per-student boundary")
+set_mode("enforce")
+config.settings.self_service_access = True
+config.settings.student_self_access = True
+
+reset(students={"stu@jaipuria.ac.in"})
+sp = principal_from_claims(claims("stu@jaipuria.ac.in"))
+check("enforce: student -> self-scoped principal (role=student, own id)",
+      sp is not None and sp["role"] == "student" and sp["student_id"] == "ID_stu"
+      and sp["campuses"] == ["noida"])
+ssvc = MoodleService(None, sp)
+check("student svc carries self_student_id", ssvc.self_student_id == "ID_stu")
+
+
+class _FakeQ:
+    def __init__(self):
+        self.eqs = []
+
+    def eq(self, col, val):
+        self.eqs.append((col, val))
+        return self
+
+check("apply_student bounds a query to the student's own id",
+      _FakeQ().eqs == [] and ssvc.apply_student(_FakeQ()).eqs == [("student_id", "ID_stu")])
+
+# a faculty principal is NOT bounded (apply_student is a no-op)
+reset(students=())
+fsvc = MoodleService(None, {"name": "F", "email": "f@jaipuria.ac.in", "campuses": ["noida"],
+                            "role": "faculty"})
+check("faculty svc has no student boundary", fsvc.self_student_id is None
+      and fsvc.apply_student(_FakeQ()).eqs == [])
+
+# dual-role: an email in BOTH the student roster AND the educator registry -> educator wins
+reset(rows={"ta@jaipuria.ac.in": {"name": "TA", "campuses": ["noida"], "active": True,
+                                  "role": "faculty"}},
+      students={"ta@jaipuria.ac.in"})
+dp = principal_from_claims(claims("ta@jaipuria.ac.in"))
+check("dual-role (student+faculty) -> educator precedence",
+      dp is not None and dp["role"] == "faculty" and "student_id" not in dp)
+
+# student self-access OFF -> student denied entirely
+config.settings.student_self_access = False
+reset(students={"stu@jaipuria.ac.in"})
+check("student self-access OFF -> student denied",
+      principal_from_claims(claims("stu@jaipuria.ac.in")) is None)
+config.settings.student_self_access = True
+
+# identity unresolved (roster says student, but no identity row) -> deny, never unbounded
+reset(students={"ghost@jaipuria.ac.in"})
+faculty._fetch_student_identity = lambda e: None
+check("student with unresolvable identity -> denied (never unbounded)",
+      principal_from_claims(claims("ghost@jaipuria.ac.in")) is None)
 
 # leave the singleton mode back at off so import order can't leak into other suites
 set_mode("off")
