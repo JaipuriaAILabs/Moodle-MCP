@@ -74,6 +74,7 @@ check("shadow: registry consulted (would-be grant computed)", calls["faculty"] >
 
 print("MODE enforce — mcp_faculty is authoritative")
 set_mode("enforce")
+config.settings.self_service_access = False  # this section tests pure registry resolution (hard deny)
 
 reset(rows={"noida.prof@jaipuria.ac.in":
             {"name": "N", "campuses": ["noida"], "active": True, "role": "faculty",
@@ -123,6 +124,90 @@ svc2 = MoodleService(None, principal_from_claims(claims("noida.prof@jaipuria.ac.
 check("enforce: faculty CAN generate by default", svc2.can_generate is True)
 check("enforce: faculty scope blocks other campus",
       svc2.campus_scope("noida") == ["noida"] and svc2.campus_scope("jaipur") == [])
+
+print("Self-service access (enforce) — pending session + request_access")
+import asyncio  # noqa: E402
+from tools import access  # noqa: E402
+from tools.access import AccessRequestParams  # noqa: E402
+
+set_mode("enforce")
+config.settings.self_service_access = True
+reset(rows={})  # nobody provisioned
+p = principal_from_claims(claims("newprof@jaipuria.ac.in"))
+check("enforce+self-service: unlisted -> pending (not denied)",
+      p is not None and p.get("role") == "pending")
+psvc = MoodleService(None, p)
+check("pending: no campus access (every data tool denies)",
+      psvc.campus_scope("noida") == [] and psvc.allowed_campuses == [])
+check("pending: cannot generate reports", psvc.can_generate is False)
+
+config.settings.self_service_access = False
+reset(rows={})
+check("enforce + self-service OFF: unlisted -> hard deny",
+      principal_from_claims(claims("newprof@jaipuria.ac.in")) is None)
+config.settings.self_service_access = True
+
+# request_access tool: capture the registered coroutines with a fake MCP
+class _FakeMCP:
+    def __init__(self):
+        self.tools = {}
+
+    def tool(self, **_kw):
+        def deco(fn):
+            self.tools[fn.__name__] = fn
+            return fn
+        return deco
+
+_submits = []
+faculty.submit_access_request = lambda email, name, role, campuses: (
+    _submits.append((email, role, tuple(campuses))) or True)
+
+_fake = _FakeMCP()
+_pending = MoodleService(None, {"name": "New", "email": "newprof@jaipuria.ac.in",
+                                "campuses": [], "role": "pending", "can_generate": False})
+
+
+async def _get_pending():
+    return _pending
+
+access.register(_fake, _get_pending)
+check("access tools registered", "request_access" in _fake.tools
+      and "list_access_requests" in _fake.tools)
+
+r = asyncio.run(_fake.tools["request_access"](AccessRequestParams(campus="noida", role="faculty")))
+check("request_access: valid campus/role -> pending + submitted",
+      r.get("ok") is True and r.get("status") == "pending"
+      and _submits and _submits[-1] == ("newprof@jaipuria.ac.in", "faculty", ("noida",)))
+
+before = len(_submits)
+r = asyncio.run(_fake.tools["request_access"](AccessRequestParams(campus="delhi", role="faculty")))
+check("request_access: unknown campus rejected, nothing submitted",
+      r.get("ok") is False and len(_submits) == before)
+
+r = asyncio.run(_fake.tools["request_access"](AccessRequestParams(campus="noida", role="admin")))
+check("request_access: privileged role 'admin' not self-requestable",
+      r.get("ok") is False and len(_submits) == before)
+
+# list_access_requests is admin-only
+faculty.list_pending_requests = lambda limit=200: [{"email": "x@jaipuria.ac.in"}]
+denied = False
+try:
+    asyncio.run(_fake.tools["list_access_requests"]())
+except PermissionError:
+    denied = True
+check("list_access_requests: denied for non-admin (pending) principal", denied)
+
+_admin = MoodleService(None, {"name": "Admin", "email": "mansi.gambhir@jaipuria.ac.in",
+                              "campuses": None, "role": "admin", "can_generate": True})
+
+
+async def _get_admin():
+    return _admin
+
+_fake2 = _FakeMCP()
+access.register(_fake2, _get_admin)
+out = asyncio.run(_fake2.tools["list_access_requests"]())
+check("list_access_requests: admin sees the queue", out.get("pending") == [{"email": "x@jaipuria.ac.in"}])
 
 # leave the singleton mode back at off so import order can't leak into other suites
 set_mode("off")

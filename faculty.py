@@ -138,6 +138,35 @@ def faculty_grant(email: str):
     return dict(grant)
 
 
+def submit_access_request(email: str, name, role: str, campuses) -> bool:
+    """File/refresh a pending self-service access request via the SECURITY DEFINER RPC
+    (the read-only DB role has execute on it but no write grant on the inbox). Fail-safe:
+    returns False on any error so the tool can tell the user to retry."""
+    email = (email or "").strip().lower()
+    if not email:
+        return False
+    try:
+        _sb().rpc("request_mcp_access", {
+            "p_email": email, "p_name": name or "",
+            "p_role": role, "p_campuses": campuses}).execute()
+        return True
+    except Exception:  # noqa: BLE001
+        log.warning("access request submit failed for subject=%s", _subject(email), exc_info=True)
+        return False
+
+
+def list_pending_requests(limit: int = 200):
+    """Pending self-service requests (admin view). Empty list on any error."""
+    try:
+        rows = (_sb().table("mcp_access_requests")
+                .select("email,name,requested_role,requested_campuses,status,created_at")
+                .eq("status", "pending").order("created_at").limit(limit).execute()).data
+        return rows or []
+    except Exception:  # noqa: BLE001
+        log.warning("listing access requests failed", exc_info=True)
+        return []
+
+
 def is_student(email: str) -> bool:
     """True when the email appears in the student roster — those accounts are
     hard-denied regardless of any mcp_faculty row. On a DB error this returns

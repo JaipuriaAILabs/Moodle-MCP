@@ -21,7 +21,7 @@ from security import (HostGuard, SecurityHeaders, TransportGuard, bearer_of,
                       build_middleware, quiet_noisy_loggers, resolve_principal,
                       resolve_oauth_principal)
 from supabase_client import create_service
-from tools import actions, analytics, at_risk, insights, reports, students, subjects
+from tools import access, actions, analytics, at_risk, insights, reports, students, subjects
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -181,9 +181,13 @@ async def whoami() -> dict:
     """
     svc = await get_authenticated_service()
     out = {"name": svc.principal.get("name", "faculty"),
-           "campuses": svc.allowed_campuses if svc.allowed_campuses is not None else "all"}
+           "campuses": svc.allowed_campuses if svc.allowed_campuses is not None else "all",
+           "role": getattr(svc, "role", None)}
     if svc.principal.get("email"):
         out["email"] = svc.principal["email"]
+    if getattr(svc, "role", None) == "pending":
+        out["note"] = ("You have no campus access yet. Use request_access with your campus "
+                       "and role to request it; an administrator will approve it.")
     return out
 
 
@@ -195,6 +199,7 @@ analytics.register(mcp, get_authenticated_service)    # cohort marks/attendance 
 at_risk.register(mcp, get_authenticated_service)      # at-risk / attendance watch / zeros (raw)
 reports.register(mcp, get_authenticated_service)      # generated narrative report (secondary)
 actions.register(mcp, get_authenticated_service)      # create_report (the one write-path tool)
+access.register(mcp, get_authenticated_service)        # self-service RBAC: request_access + queue (admin)
 
 app = mcp.http_app()
 

@@ -174,6 +174,10 @@ class Settings(BaseSettings):
     rbac_mode_raw: str = Field(default="off", alias="MCP_RBAC_MODE")
     # Canonical campus codes (lowercase), used to validate grants against known campuses.
     campuses_raw: str = Field(default="noida,lucknow,jaipur,indore", alias="MCP_CAMPUSES")
+    # Self-service access (enforce mode): when on, an unprovisioned verified account is NOT
+    # hard-denied — it gets a limited "pending" session that can only call request_access
+    # (pick a campus+role → admin approval queue). Off = hard-deny unlisted accounts.
+    self_service_access: bool = Field(default=True, alias="MCP_SELF_SERVICE_ACCESS")
 
     def gateway_secrets(self) -> list[str]:
         return [s.strip() for s in self.gateway_shared_secret.split(",") if s.strip()]

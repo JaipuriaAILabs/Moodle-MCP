@@ -100,13 +100,23 @@ def _role_for(campuses) -> str:
     return "cross_campus" if campuses is None else "faculty"
 
 
-def _registry_principal(claims: dict, email: str, domain: str, *, quiet: bool = False):
+def _pending_principal(claims: dict, email: str) -> dict:
+    """A limited session for a verified-but-unprovisioned account: no campus scope and no
+    report generation, so every DATA tool denies (campus_scope == []), but request_access
+    stays callable so the user can self-request a campus+role for admin approval."""
+    return {"name": claims.get("name") or email, "email": email,
+            "campuses": [], "role": "pending", "can_generate": False}
+
+
+def _registry_principal(claims: dict, email: str, domain: str, *, quiet: bool = False,
+                        pending_ok: bool = False):
     """The authoritative RBAC resolution for ANY account (Jaipuria included): the env
     override, student-roster deny, mcp_faculty grant, domain gate, and configured
     default — in that order. Returns a principal dict carrying role + can_generate, or
     None (deny). This is what ENFORCE mode returns, and what SHADOW mode logs. Kept
     separate so the historical all-access path (OFF/SHADOW for Jaipuria) is untouched.
-    `quiet` suppresses the per-denial warnings (used by shadow, which logs its own line)."""
+    `quiet` suppresses the per-denial warnings (used by shadow, which logs its own line).
+    `pending_ok` turns the final default-deny into a limited 'pending' session (self-service)."""
     from config import settings
     import faculty as registry
 
@@ -142,6 +152,8 @@ def _registry_principal(claims: dict, email: str, domain: str, *, quiet: bool = 
     # 5. Default grant for an allowed-domain account with no explicit row.
     default = settings.oauth_default_campuses()
     if default == "deny":
+        if pending_ok:
+            return _pending_principal(claims, email)   # self-service: limited pending session
         if not quiet:
             subject = hashlib.sha256(email.encode()).hexdigest()[:12]
             log.warning("oauth sign-in rejected: subject=%s has no explicit grant", subject)
@@ -155,10 +167,14 @@ def _log_shadow(claims: dict, email: str, domain: str) -> None:
     without changing the served (all-access) principal. Never raises — a shadow-logging
     failure must not affect a real sign-in."""
     try:
+        from config import settings
         subject = hashlib.sha256(email.encode()).hexdigest()[:12]
-        would = _registry_principal(claims, email, domain, quiet=True)
+        would = _registry_principal(claims, email, domain, quiet=True,
+                                    pending_ok=settings.self_service_access)
         if would is None:
-            log.info("rbac.shadow subject=%s would=DENY (no active mcp_faculty grant)", subject)
+            log.info("rbac.shadow subject=%s would=DENY (no grant; self-service off)", subject)
+        elif would.get("role") == "pending":
+            log.info("rbac.shadow subject=%s would=PENDING (no grant; may self-request access)", subject)
         else:
             camp = would.get("campuses")
             log.info("rbac.shadow subject=%s would=ALLOW role=%s campuses=%s can_generate=%s",
@@ -192,7 +208,8 @@ def principal_from_claims(claims: dict):
     if is_jaipuria:
         mode = settings.rbac_mode()
         if mode == "enforce":
-            return _registry_principal(claims, email, domain)
+            return _registry_principal(claims, email, domain,
+                                       pending_ok=settings.self_service_access)
         # OFF / SHADOW: preserve the historical all-campus grant (served access unchanged).
         if mode == "shadow":
             _log_shadow(claims, email, domain)

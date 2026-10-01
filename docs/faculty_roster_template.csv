@@ -1,0 +1,16 @@
+email,name,role,campuses,can_generate,note
+# Fill one row per person who should have Moodle MCP access. Delete these comment lines before loading.
+# ---- columns ----
+# email        : their @jaipuria.ac.in Google address (lowercase).
+# name         : display name (optional; falls back to the Google name).
+# role         : one of  faculty | campus_admin | cross_campus | admin | viewer
+# campuses     : for faculty/campus_admin/viewer -> a | -separated list from {noida,lucknow,jaipur,indore}
+#                for cross_campus/admin           -> the literal word  all
+# can_generate : true/false — may this person run create_report? (viewers -> false)
+# note         : free text (department, who approved, etc.)
+# ---- examples (replace with real people) ----
+prof.sharma@jaipuria.ac.in,A. Sharma,faculty,noida,true,Marketing faculty Noida
+prof.verma@jaipuria.ac.in,B. Verma,faculty,lucknow|noida,true,Teaches at two campuses
+head.jaipur@jaipuria.ac.in,C. Rao,campus_admin,jaipur,true,Program head Jaipur
+dean.office@jaipuria.ac.in,D. Mehta,cross_campus,all,true,Central academic office
+reports.viewer@jaipuria.ac.in,E. Singh,viewer,indore,false,Read-only dashboards, no report generation
