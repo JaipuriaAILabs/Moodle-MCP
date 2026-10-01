@@ -70,7 +70,9 @@ check("None -> invalid", faculty.normalize_campuses(None) == "invalid")
 print("PHASE 2 — DB registry grants")
 reset(rows={"prof@example.com": {"name": "Prof", "campuses": ["noida"], "active": True}})
 p = principal_from_claims(claims("prof@example.com"))
-check("active external row grants scoped principal", p == {"name": "Prof", "email": "prof@example.com", "campuses": ["noida"]})
+check("active external row grants scoped principal",
+      p == {"name": "Prof", "email": "prof@example.com", "campuses": ["noida"],
+            "role": "faculty", "can_generate": True})
 reset(rows={"prof@example.com": {"name": "Prof", "campuses": "all", "active": True}})
 p = principal_from_claims(claims("prof@example.com"))
 check('campuses "all" -> None (all)', p is not None and p["campuses"] is None)

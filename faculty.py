@@ -46,7 +46,8 @@ def _sb():
 
 # --- raw fetches (module-level so tests can monkeypatch them) ----------------
 def _fetch_faculty_row(email: str):
-    rows = (_sb().table("mcp_faculty").select("name,campuses,active")
+    rows = (_sb().table("mcp_faculty")
+            .select("name,campuses,active,role,can_generate,expires_at")
             .eq("email", email).limit(1).execute()).data
     return rows[0] if rows else None
 
@@ -58,6 +59,32 @@ def _fetch_student_hit(email: str) -> bool:
 
 
 # --- public API ---------------------------------------------------------------
+_VALID_ROLES = ("admin", "cross_campus", "campus_admin", "faculty", "viewer")
+
+
+def _expired(ts) -> bool:
+    """True when an ISO `expires_at` timestamp is in the past. Unparseable values are
+    treated as NOT expired at runtime (the DB CHECK guarantees the format; a runtime
+    parse error must not lock a valid grant out and cause an outage)."""
+    if not ts:
+        return False
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(str(ts).strip().replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) >= dt
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def normalize_role(v) -> str:
+    """mcp_faculty.role -> a known role string, defaulting to 'faculty' for a missing/
+    unknown value (never widens: 'faculty' is scoped, and campuses still gate breadth)."""
+    r = str(v or "faculty").strip().lower()
+    return r if r in _VALID_ROLES else "faculty"
+
+
 def normalize_campuses(v):
     """mcp_faculty.campuses -> principal 'campuses' value: None for "all", a
     non-empty list of lowercase strings for a scoped grant, or the sentinel
@@ -92,13 +119,20 @@ def faculty_grant(email: str):
     if not row or row.get("active") is not True:
         _grants.set(email, _MISS)
         return None
+    if _expired(row.get("expires_at")):
+        log.warning("mcp_faculty row for subject=%s is expired — denying", _subject(email))
+        _grants.set(email, _MISS)
+        return None
     campuses = normalize_campuses(row.get("campuses"))
     if campuses == "invalid":
         log.error("mcp_faculty row for subject=%s has malformed campuses %r — denying",
                   _subject(email), row.get("campuses"))
         _grants.set(email, _MISS)
         return None
-    grant = {"name": row.get("name"), "campuses": campuses}
+    can_generate = row.get("can_generate")
+    grant = {"name": row.get("name"), "campuses": campuses,
+             "role": normalize_role(row.get("role")),
+             "can_generate": True if can_generate is None else bool(can_generate)}
     _grants.set(email, grant)
     _stale_grants.set(email, grant)
     return dict(grant)

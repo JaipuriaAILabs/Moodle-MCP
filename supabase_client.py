@@ -53,6 +53,10 @@ class MoodleService:
             None if campuses is None else
             [str(campus).strip().lower() for campus in campuses]
         )
+        # RBAC attributes (present on registry-resolved principals; safe defaults keep
+        # every legacy/static-token/all-access principal fully capable).
+        self.role = principal.get("role") or ("cross_campus" if campuses is None else "faculty")
+        self.can_generate = bool(principal.get("can_generate", True))
 
     # --- campus scoping ---------------------------------------------------
     def campus_scope(self, requested: str | None):

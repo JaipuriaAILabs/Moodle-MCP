@@ -278,6 +278,13 @@ def _safe_report_url(value: object) -> bool:
 
 
 async def _create_impl(svc, p: CreateReportParams) -> dict:
+    # Capability gate (RBAC): a role without report-generation rights (e.g. `viewer`)
+    # cannot spend an LLM generation. No-op unless RBAC enforce assigns can_generate=False,
+    # since every other path leaves the principal's can_generate defaulted to True. Read
+    # defensively (default True) — campus data-scoping is enforced separately and always,
+    # so this is a capability cap, not the data boundary.
+    if not getattr(svc, "can_generate", True):
+        raise PermissionError(MSG_DENIED)
     if p.campus and svc.campus_scope(p.campus) == []:
         raise PermissionError(MSG_DENIED)  # explicit campus outside the caller's grant
     if not settings.report_generation_enabled():

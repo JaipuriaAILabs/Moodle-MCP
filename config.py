@@ -161,6 +161,20 @@ class Settings(BaseSettings):
     gateway_enforced: bool = Field(default=False, alias="GATEWAY_ENFORCED")
     gateway_shared_secret: str = Field(default="", alias="GATEWAY_SHARED_SECRET")
 
+    # --- per-campus RBAC (AIA campus scoping). Default OFF preserves today's behavior.
+    #   off     : every verified jaipuria.ac.in account keeps all-campus access (the
+    #             historical "G1 all-access" policy) — the mcp_faculty registry is not
+    #             consulted for Jaipuria emails, so this path is unchanged and DB-free.
+    #   shadow  : SERVE all-access unchanged, but for each Jaipuria caller also compute
+    #             and LOG (prefix "rbac.shadow") the grant that ENFORCE would apply —
+    #             role + campus scope, or a would-deny — so the roster can be validated
+    #             against real traffic before flipping.
+    #   enforce : the mcp_faculty registry is authoritative for every account — role +
+    #             campus scope per email; unlisted / inactive / expired / student -> deny.
+    rbac_mode_raw: str = Field(default="off", alias="MCP_RBAC_MODE")
+    # Canonical campus codes (lowercase), used to validate grants against known campuses.
+    campuses_raw: str = Field(default="noida,lucknow,jaipur,indore", alias="MCP_CAMPUSES")
+
     def gateway_secrets(self) -> list[str]:
         return [s.strip() for s in self.gateway_shared_secret.split(",") if s.strip()]
 
@@ -256,6 +270,15 @@ class Settings(BaseSettings):
             log.warning("MCP_FACULTY is not valid JSON; ignoring")
             return {}
 
+    def rbac_mode(self) -> str:
+        """Normalised per-campus RBAC mode: 'off' | 'shadow' | 'enforce' (bad value -> 'off')."""
+        mode = self.rbac_mode_raw.strip().lower()
+        return mode if mode in ("off", "shadow", "enforce") else "off"
+
+    def campuses(self) -> list[str]:
+        """Canonical lowercase campus codes for grant validation (e.g. noida/lucknow/jaipur/indore)."""
+        return [c.strip().lower() for c in self.campuses_raw.split(",") if c.strip()]
+
     def oauth_default_campuses(self):
         """Default grant for a domain-verified email with no MCP_FACULTY entry.
         Returns None (all campuses), a list, or the sentinel string 'deny'."""
@@ -317,6 +340,11 @@ def validate_config() -> None:
     }.items() if not v]
     if missing:
         raise RuntimeError(f"missing required config: {', '.join(missing)}")
+
+    # Per-campus RBAC mode must be a known value (a typo must fail loudly at boot, not
+    # silently fall back to 'off' and leave the operator believing scoping is on).
+    if settings.rbac_mode_raw.strip().lower() not in ("", "off", "shadow", "enforce"):
+        raise RuntimeError("MCP_RBAC_MODE must be one of: off, shadow, enforce")
 
     # Strict, fail-closed validation of MCP_TOKENS shape.
     if settings.mcp_tokens_raw.strip():
@@ -396,7 +424,20 @@ def validate_config() -> None:
             if not isinstance(parsed_default, list) or not _valid_campuses(parsed_default):
                 raise RuntimeError("OAUTH_DEFAULT_CAMPUSES must be 'none', 'all', or a JSON "
                                    "list of non-empty campus names")
-        log.info("Every verified jaipuria.ac.in Google account has all-campus MCP access")
+        mode = settings.rbac_mode()
+        log.info("per-campus RBAC mode: %s (campuses=%s)", mode, ",".join(settings.campuses()))
+        if mode == "off":
+            log.info("RBAC off — every verified jaipuria.ac.in Google account has all-campus access")
+        elif mode == "shadow":
+            log.info("RBAC shadow — serving all-campus access; logging would-be grants "
+                     "(prefix 'rbac.shadow') for roster validation, no user-facing change")
+        else:
+            log.warning("RBAC ENFORCE — access is role/campus-scoped from the mcp_faculty "
+                        "registry; unlisted/inactive/student jaipuria.ac.in accounts are DENIED")
+            if settings.oauth_default_campuses() != "deny":
+                log.warning("RBAC enforce with OAUTH_DEFAULT_CAMPUSES != none: any allowed-domain "
+                            "account WITHOUT an mcp_faculty row still receives the default grant. "
+                            "Set OAUTH_DEFAULT_CAMPUSES=none for strict registry-only access.")
         if not settings.oauth_jwt_signing_key:
             log.warning("OAUTH_JWT_SIGNING_KEY not set — issued OAuth tokens are "
                         "invalidated on every restart/redeploy (users must re-login)")

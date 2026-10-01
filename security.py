@@ -93,10 +93,88 @@ def bearer_of(headers: dict) -> str:
 
 
 # --- OAuth (Google sign-in) principal resolution -----------------------------
+def _role_for(campuses) -> str:
+    """A sensible role when none is stored: an all-campus grant is cross-campus,
+    a scoped grant is faculty. (mcp_faculty rows carry an explicit role; this only
+    covers env/default grants that predate the role concept.)"""
+    return "cross_campus" if campuses is None else "faculty"
+
+
+def _registry_principal(claims: dict, email: str, domain: str, *, quiet: bool = False):
+    """The authoritative RBAC resolution for ANY account (Jaipuria included): the env
+    override, student-roster deny, mcp_faculty grant, domain gate, and configured
+    default — in that order. Returns a principal dict carrying role + can_generate, or
+    None (deny). This is what ENFORCE mode returns, and what SHADOW mode logs. Kept
+    separate so the historical all-access path (OFF/SHADOW for Jaipuria) is untouched.
+    `quiet` suppresses the per-denial warnings (used by shadow, which logs its own line)."""
+    from config import settings
+    import faculty as registry
+
+    # 1. Env override (admin break-glass) — an EXPLICITLY listed email is allowed
+    #    regardless of domain (so a named guest can be granted without opening the gate).
+    override = settings.faculty().get(email)
+    if override is not None:
+        camp = override.get("campuses")
+        return {"name": override.get("name") or claims.get("name") or email, "email": email,
+                "campuses": camp, "role": _role_for(camp), "can_generate": True}
+
+    # 2. Student-roster deny — a student account never gets faculty MCP access.
+    if registry.is_student(email):
+        return None
+
+    # 3. mcp_faculty DB row — the authoritative allowlist (role + campus scope).
+    #    Writes are service-role only, so it is admin-controlled.
+    grant = registry.faculty_grant(email)
+    if grant is not None:
+        return {"name": grant.get("name") or claims.get("name") or email, "email": email,
+                "campuses": grant["campuses"], "role": grant.get("role") or "faculty",
+                "can_generate": grant.get("can_generate", True)}
+
+    # 4. Domain gate — only the DEFAULT-grant path is domain-restricted. Accept an
+    #    allowed domain AND its subdomains; the leading dot blocks look-alikes.
+    allowed = settings.oauth_allowed_domains()
+    if not any(domain == a or domain.endswith("." + a) for a in allowed):
+        if not quiet:
+            subject = hashlib.sha256(email.encode()).hexdigest()[:12]
+            log.warning("oauth sign-in rejected: subject=%s domain %r not allowed", subject, domain)
+        return None
+
+    # 5. Default grant for an allowed-domain account with no explicit row.
+    default = settings.oauth_default_campuses()
+    if default == "deny":
+        if not quiet:
+            subject = hashlib.sha256(email.encode()).hexdigest()[:12]
+            log.warning("oauth sign-in rejected: subject=%s has no explicit grant", subject)
+        return None
+    return {"name": claims.get("name") or email, "email": email, "campuses": default,
+            "role": _role_for(default), "can_generate": True}
+
+
+def _log_shadow(claims: dict, email: str, domain: str) -> None:
+    """SHADOW mode: compute what ENFORCE *would* do for this Jaipuria caller and log it,
+    without changing the served (all-access) principal. Never raises — a shadow-logging
+    failure must not affect a real sign-in."""
+    try:
+        subject = hashlib.sha256(email.encode()).hexdigest()[:12]
+        would = _registry_principal(claims, email, domain, quiet=True)
+        if would is None:
+            log.info("rbac.shadow subject=%s would=DENY (no active mcp_faculty grant)", subject)
+        else:
+            camp = would.get("campuses")
+            log.info("rbac.shadow subject=%s would=ALLOW role=%s campuses=%s can_generate=%s",
+                     subject, would.get("role"),
+                     "all" if camp is None else ",".join(camp), would.get("can_generate"))
+    except Exception:  # noqa: BLE001 — shadow observation must never break auth
+        log.warning("rbac.shadow computation failed", exc_info=True)
+
+
 def principal_from_claims(claims: dict):
-    """Verified Jaipuria Google accounts receive all-campus access.
-    Other domains still follow the explicit-override, student-roster,
-    registry, and configured-default policy."""
+    """Resolve a verified Google identity to a principal (or None = deny), governed by
+    MCP_RBAC_MODE. OFF (default): verified Jaipuria accounts get all-campus access, the
+    historical policy. SHADOW: same served access, but the would-be enforced grant is
+    logged. ENFORCE: the mcp_faculty registry is authoritative (role + campus scope;
+    unlisted/inactive/student Jaipuria accounts denied). Non-Jaipuria accounts always
+    follow the registry ladder, in every mode (they were never all-access)."""
     from config import settings
     email = str(claims.get("email") or "").strip().lower()
     if email.count("@") != 1:
@@ -109,52 +187,20 @@ def principal_from_claims(claims: dict):
     if verified is not True:
         return None
     domain = email.rsplit("@", 1)[1]
+    is_jaipuria = domain == "jaipuria.ac.in" or domain.endswith(".jaipuria.ac.in")
 
-    # Every verified Jaipuria ID can use every MCP tool across campuses, including
-    # accounts present in the student roster. Apply this before the old per-person
-    # grants so an existing scoped row or OAUTH_DEFAULT_CAMPUSES=none cannot block it.
-    if domain == "jaipuria.ac.in" or domain.endswith(".jaipuria.ac.in"):
-        return {"name": claims.get("name") or email, "email": email,
-                "campuses": None}
+    if is_jaipuria:
+        mode = settings.rbac_mode()
+        if mode == "enforce":
+            return _registry_principal(claims, email, domain)
+        # OFF / SHADOW: preserve the historical all-campus grant (served access unchanged).
+        if mode == "shadow":
+            _log_shadow(claims, email, domain)
+        return {"name": claims.get("name") or email, "email": email, "campuses": None}
 
-    # 1. Env override (admin break-glass) — an EXPLICITLY listed email is allowed
-    #    regardless of domain (so a named external guest, e.g. a VC's gmail, can be
-    #    granted without opening the domain gate to the whole world).
-    override = settings.faculty().get(email)
-    if override is not None:
-        return {"name": override.get("name") or claims.get("name") or email,
-                "email": email, "campuses": override.get("campuses")}
-
-    # 2. Legacy student-roster deny for non-Jaipuria accounts only.
-    import faculty as registry
-    if registry.is_student(email):
-        return None
-
-    # 3. mcp_faculty DB row — an EXPLICIT allowlist for external email
-    #    (any domain, e.g. a specific VC gmail) is granted without the domain gate.
-    #    Writes to this table are service-role only, so it is admin-controlled.
-    grant = registry.faculty_grant(email)
-    if grant is not None:
-        return {"name": grant.get("name") or claims.get("name") or email,
-                "email": email, "campuses": grant["campuses"]}
-
-    # 4. Domain gate — only the DEFAULT-grant path is domain-restricted. Accept an
-    #    allowed domain AND its subdomains (ailabs.jaipuria.ac.in matches jaipuria.ac.in);
-    #    the leading dot blocks look-alikes like evil-jaipuria.ac.in. A non-allowlisted
-    #    address outside the allowed domains (e.g. a random gmail) is denied here.
-    allowed = settings.oauth_allowed_domains()
-    if not any(domain == a or domain.endswith("." + a) for a in allowed):
-        subject = hashlib.sha256(email.encode()).hexdigest()[:12]
-        log.warning("oauth sign-in rejected: subject=%s domain %r not allowed", subject, domain)
-        return None
-
-    # 5. Default grant for an allowed-domain account with no explicit row.
-    default = settings.oauth_default_campuses()
-    if default == "deny":
-        subject = hashlib.sha256(email.encode()).hexdigest()[:12]
-        log.warning("oauth sign-in rejected: subject=%s has no explicit grant", subject)
-        return None
-    return {"name": claims.get("name") or email, "email": email, "campuses": default}
+    # Non-Jaipuria accounts: always the registry ladder (unchanged in every mode — they
+    # were never covered by the all-access policy).
+    return _registry_principal(claims, email, domain)
 
 
 def resolve_oauth_principal():
