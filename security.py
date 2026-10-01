@@ -210,7 +210,17 @@ def principal_from_claims(claims: dict):
         if mode == "enforce":
             return _registry_principal(claims, email, domain,
                                        pending_ok=settings.self_service_access)
-        # OFF / SHADOW: preserve the historical all-campus grant (served access unchanged).
+        # OFF / SHADOW: historical all-campus grant — but a STUDENT roster email must NEVER
+        # receive it: the cohort-wide grant would let one student read every other student's
+        # data. This holds in every mode (enforce denies students via the registry ladder).
+        # An educator explicitly listed in the MCP_FACULTY env override is exempt (covers a
+        # dual-role TA) and does not trigger the roster lookup.
+        import faculty as registry
+        if email not in settings.faculty() and registry.is_student(email):
+            subject = hashlib.sha256(email.encode()).hexdigest()[:12]
+            log.warning("student roster email denied all-access (subject=%s, mode=%s)", subject, mode)
+            return None
+        # OFF / SHADOW: preserve the historical all-campus grant for non-student accounts.
         if mode == "shadow":
             _log_shadow(claims, email, domain)
         return {"name": claims.get("name") or email, "email": email, "campuses": None}

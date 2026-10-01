@@ -34,6 +34,7 @@ def reset(rows=None, students=(), db_error=False, student_error=False):
     faculty._grants = faculty.TTLCache(maxsize=64, ttl=60)
     faculty._stale_grants = faculty.TTLCache(maxsize=64, ttl=3600)
     faculty._students = faculty.TTLCache(maxsize=64, ttl=60)
+    faculty._stale_students = faculty.TTLCache(maxsize=64, ttl=3600)
     calls = {"faculty": 0, "student": 0}
 
     def fetch_row(email):
@@ -86,18 +87,18 @@ check("malformed external campuses -> denied", principal_from_claims(claims("pro
 reset(rows={})
 check("unknown external email -> denied (default none)", principal_from_claims(claims("stranger@example.com")) is None)
 
-print("PHASE 3 — verified Jaipuria IDs get all-campus access")
-reset(rows={"kid@jaipuria.ac.in": {"name": "Kid", "campuses": "all", "active": True}},
-      students={"kid@jaipuria.ac.in"})
-check("roster email receives all-campus access",
-      principal_from_claims(claims("kid@jaipuria.ac.in"))["campuses"] is None)
-reset(students={"kid@jaipuria.ac.in"})
+print("PHASE 3 — Jaipuria faculty get all-campus access; STUDENTS are denied it (no cross-student data)")
 import config as _cfg  # noqa: E402
-check("default none cannot block a Jaipuria ID",
-      principal_from_claims(claims("kid@jaipuria.ac.in"))["campuses"] is None)
-reset(rows={"prof@jaipuria.ac.in": {"name": "Prof", "campuses": ["noida"], "active": True}})
-check("old per-campus row cannot narrow a Jaipuria ID",
+reset(students=())  # a normal faculty, not in the student roster
+check("non-student Jaipuria faculty gets all-campus access",
       principal_from_claims(claims("prof@jaipuria.ac.in"))["campuses"] is None)
+reset(students={"kid@jaipuria.ac.in"})
+check("STUDENT roster email DENIED the all-campus grant (privacy, every mode)",
+      principal_from_claims(claims("kid@jaipuria.ac.in")) is None)
+reset(rows={"prof@jaipuria.ac.in": {"name": "Prof", "campuses": ["noida"], "active": True}}, students=())
+check("old per-campus row cannot narrow a (non-student) Jaipuria ID",
+      principal_from_claims(claims("prof@jaipuria.ac.in"))["campuses"] is None)
+reset(students=())
 check("mixed-case Jaipuria ID accepted",
       principal_from_claims(claims("PROF@JAIPURIA.AC.IN"))["email"] == "prof@jaipuria.ac.in")
 check("subdomain Jaipuria ID accepted",
@@ -105,14 +106,23 @@ check("subdomain Jaipuria ID accepted",
 check("lookalike domain denied",
       principal_from_claims(claims("prof@evil-jaipuria.ac.in")) is None)
 from supabase_client import MoodleService  # noqa: E402
-svc = MoodleService(None, principal_from_claims(claims("kid@jaipuria.ac.in")))
-check("Jaipuria principal can query multiple campuses",
+svc = MoodleService(None, principal_from_claims(claims("prof@jaipuria.ac.in")))
+check("Jaipuria faculty principal can query multiple campuses",
       svc.campus_scope("noida") == ["noida"]
       and svc.campus_scope("jaipur") == ["jaipur"])
-calls = reset(db_error=True, student_error=True)
-check("Jaipuria sign-in does not depend on registry availability",
-      principal_from_claims(claims("kid@jaipuria.ac.in"))["campuses"] is None
-      and calls == {"faculty": 0, "student": 0})
+# resilience: a previously-seen faculty survives a student-roster DB blip via last-known-good
+reset(students=())
+principal_from_claims(claims("prof@jaipuria.ac.in"))         # populate the not-student cache
+faculty._students = faculty.TTLCache(maxsize=64, ttl=60)     # expire fresh cache, keep stale
+
+
+def _boom_student(email):
+    raise RuntimeError("student roster db down")
+
+
+faculty._fetch_student_hit = _boom_student
+check("faculty survives a student-roster DB blip (last-known-good)",
+      principal_from_claims(claims("prof@jaipuria.ac.in"))["campuses"] is None)
 
 print("PHASE 4 — env break-glass override beats everything")
 reset(rows={}, students={"admin@example.com"}, db_error=True, student_error=True)

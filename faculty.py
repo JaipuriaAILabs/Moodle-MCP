@@ -32,6 +32,7 @@ _MISS = "__no_grant__"
 _grants = TTLCache(maxsize=4096, ttl=_GRANT_TTL)
 _stale_grants = TTLCache(maxsize=4096, ttl=3600.0)  # last-known-good, outage grace
 _students = TTLCache(maxsize=8192, ttl=_STUDENT_TTL)
+_stale_students = TTLCache(maxsize=8192, ttl=3600.0)  # last-known-good, outage grace
 
 
 def _subject(email: str) -> str:
@@ -181,10 +182,19 @@ def is_student(email: str) -> bool:
     try:
         found = _fetch_student_hit(email)
     except Exception:  # noqa: BLE001
+        stale = _stale_students.get(email)
+        if stale is not None:
+            # Last-known-good: a previously-seen faculty (stale False) is not kicked out by a
+            # transient roster-DB blip; a previously-seen student stays denied. Only a
+            # never-seen email with the DB down fails closed (deny) below.
+            log.warning("student-roster check failed for subject=%s — serving last-known-good",
+                        _subject(email))
+            return stale
         log.warning("student-roster check failed for subject=%s — fail-closed deny",
                     _subject(email))
         return True
     _students.set(email, found)
+    _stale_students.set(email, found)
     if found:
         log.warning("access denied: subject=%s is in the student roster", _subject(email))
     return found

@@ -62,15 +62,20 @@ print("MODE off — historical all-access for Jaipuria, registry NOT consulted")
 set_mode("off")
 calls = reset(rows={"prof@jaipuria.ac.in": {"name": "Prof", "campuses": ["noida"], "active": True}})
 p = principal_from_claims(claims("prof@jaipuria.ac.in"))
-check("off: Jaipuria gets all campuses", p is not None and p["campuses"] is None)
-check("off: registry not touched for Jaipuria", calls == {"faculty": 0, "student": 0})
+check("off: Jaipuria faculty gets all campuses", p is not None and p["campuses"] is None)
+calls = reset(students={"kid@jaipuria.ac.in"})
+check("off: STUDENT denied the all-access grant (no cross-student data)",
+      principal_from_claims(claims("kid@jaipuria.ac.in")) is None)
 
 print("MODE shadow — served access unchanged, but registry IS evaluated (for logging)")
 set_mode("shadow")
 calls = reset(rows={"prof@jaipuria.ac.in": {"name": "Prof", "campuses": ["noida"], "active": True}})
 p = principal_from_claims(claims("prof@jaipuria.ac.in"))
-check("shadow: served principal still all-access", p is not None and p["campuses"] is None)
+check("shadow: faculty served all-access", p is not None and p["campuses"] is None)
 check("shadow: registry consulted (would-be grant computed)", calls["faculty"] >= 1)
+reset(students={"kid@jaipuria.ac.in"})
+check("shadow: STUDENT denied the all-access grant (no cross-student data)",
+      principal_from_claims(claims("kid@jaipuria.ac.in")) is None)
 
 print("MODE enforce — mcp_faculty is authoritative")
 set_mode("enforce")
