@@ -1,3 +1,3 @@
 supabase>=2.5.0     # fetch_student.py (same client the server uses)
-qrcode>=7.0         # optional: App Store / Google Play QR codes in the footer
+qrcode>=8.2         # optional: App Store / Google Play QR codes in the footer
 pillow>=10.0        # qrcode's image backend
