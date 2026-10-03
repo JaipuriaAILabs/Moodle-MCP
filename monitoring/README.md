@@ -1,7 +1,7 @@
 # Monitoring & alerting — Moodle MCP
 
 New Relic **EU**, account **8495484** (the MCP-platform observability account; distinct
-from JChat's NR account 8379209). NerdGraph endpoint: `https://api.eu.newrelic.com/graphql`.
+from the harness's NR account 8379209). NerdGraph endpoint: `https://api.eu.newrelic.com/graphql`.
 
 ## Available now (no MCP change): external uptime
 `newrelic_uptime_alert.sh` provisions, via NerdGraph:
@@ -59,8 +59,8 @@ logs aren't shipped to NR until confirmed PII-free (httpx access-token URLs are 
 quieted at boot). When on, root-logger records flow to NR Logs, correlated to traces.
 
 ## Trace propagation, sampling & instance id
-Incoming **W3C `traceparent`** is honoured, so once JChat is OTel-instrumented a
-JChat→MCP call is a single distributed trace (today each MCP call is a clean root span).
+Incoming **W3C `traceparent`** is honoured, so once the client harness is OTel-instrumented a
+harness→MCP call is a single distributed trace (today each MCP call is a clean root span).
 **Sampling is upstream-resistant**: the `ParentBased` sampler keeps our SERVER spans at
 `MCP_OTEL_SAMPLE_RATIO` (default 1.0 = all) even when a client/proxy propagates an
 *unsampled* `traceparent` (`-00`) — otherwise OTel's default would inherit that "don't

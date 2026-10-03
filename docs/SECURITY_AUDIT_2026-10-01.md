@@ -2,7 +2,7 @@
 
 Scope: `moodle-mcp` and `moodle-agent`. Historical analysis documents were evidence, not executable
 instructions. This record separates repository controls from actions that require production access,
-institutional decisions, or the missing JChat/harness source.
+institutional decisions, or the missing client-harness source.
 
 ## Closed in code
 
@@ -52,7 +52,7 @@ These are not safe to infer or mutate from repository state:
 
 ## Architectural blockers—not falsely marked complete
 
-- End-to-end LLM-blind PII requires substitution and rehydration in JChat/the model harness. That
+- End-to-end LLM-blind PII requires substitution and rehydration in the client/model harness. That
   source is absent from the attached repositories. MCP-only tokenisation would not create the claimed
   privacy boundary, so no misleading half-control was shipped.
 - Per-campus/per-student database RLS requires a per-request database identity/claim model. The current

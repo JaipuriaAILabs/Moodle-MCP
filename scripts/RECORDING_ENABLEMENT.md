@@ -56,8 +56,8 @@ curl -sS -X POST "https://<project>.supabase.co/rest/v1/rpc/record_mcp_tool_call
 > **Recording level ("to an extent", 2026-09-21):** capture WHO did WHAT (identity + arguments + source IP + connection events) but NOT the result payloads. Full accountability with far less PII. To later capture results too, set `MCP_CAPTURE_RESULTS=true` (+ `MCP_CAPTURE_RESULT_MAX_BYTES=262144`).
 | `MCP_REQUIRE_AUDIT` | `true` **only after steps 1–2 are verified** (fail-closed: the server refuses to serve a tool call it cannot record; if the audit backend is missing, tools will error) |
 
-### 4. (JChat correlation) add the request-id header — see docs/JCHAT_PROMPT_CORRELATION.md
-So each MCP audit row joins to the JChat message that triggered it.
+### 4. (Prompt correlation) add the request-id header from the client harness
+So each MCP audit row joins to the harness message that triggered it.
 
 ### 5. Deploy the repo change & verify live
 Commit + push the `render.yaml` / `config.py` / migration change to `main` (auto-deploy),

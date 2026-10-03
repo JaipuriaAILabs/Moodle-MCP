@@ -6,7 +6,7 @@ Draft — the institution/legal owns the final wording and where it's surfaced.
 ## What this service is
 The Moodle MCP lets verified Jaipuria accounts query student performance data (marks,
 attendance, subjects, cohort analytics) and generate reports through AI assistants
-(JChat, Claude, Codex). Access requires signing in with a `jaipuria.ac.in` Google
+(the client harness, Claude, Codex). Access requires signing in with a `jaipuria.ac.in` Google
 account. Every verified account can query institutional student data across campuses.
 
 ## What we record ("to an extent")

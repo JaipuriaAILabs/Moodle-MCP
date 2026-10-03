@@ -58,11 +58,11 @@ Legend: **REQ** = requirement/expectation · **NOW** = shipped/enforced today ·
 - **PARTIALLY CLOSED (2026-09-22):** `mcp_audit` lockdown is now **proven against live prod**, not just reasoned — `anon`/`authenticated` have **no schema USAGE** (can't reach any audit table), RLS is on for every base table, and even `mcp_audit_writer` has **no SELECT** (write-only via the SECURITY DEFINER RPC; only admin/`service_role` can read). Repeatable proof: `sql/verify_mcp_audit_lockdown.sql`.
 - **GAP (remaining)**: no end-to-end auth test against a running server; no gateway-routing test (gateway undeployed); no concurrency/load test; partition tables have RLS off (harmless — parent RLS + no grants + no schema usage cover them; optional defense-in-depth noted in the verify script). CI still only exercises the unit suite.
 
-### G7. JChat integration incomplete
-- **GAP**: (a) the `X-Request-Id` correlation header is a documented, **uncommitted draft** in the JChat repo — prompts aren't yet joinable to tool calls (Rajika). (b) `OAUTH_ALLOW_CROSS_CLIENT_PKCE` defaults off → the Claude.ai connector's cross-node token exchange can fail (likely re-auth-pain contributor). (c) `jaipuriaschools.ac.in` is admitted by JChat as USER but **denied by the MCP** (not a subdomain of `jaipuria.ac.in`) — graceful-denial UX unverified; decision pending.
+### G7. Client-harness integration incomplete
+- **GAP**: (a) the `X-Request-Id` correlation header is a documented, **uncommitted draft** in the harness — prompts aren't yet joinable to tool calls (Rajika). (b) `OAUTH_ALLOW_CROSS_CLIENT_PKCE` defaults off → the Claude.ai connector's cross-node token exchange can fail (likely re-auth-pain contributor). (c) `jaipuriaschools.ac.in` is admitted by the harness as USER but **denied by the MCP** (not a subdomain of `jaipuria.ac.in`) — graceful-denial UX unverified; decision pending.
 
 ### G8. "Record everything" is only half — prompts aren't captured MCP-side
-- **NOW**: the MCP records tool calls + args + results. The user's **prompts/questions live only in JChat** (Mongo/Langfuse).
+- **NOW**: the MCP records tool calls + args + results. The user's **prompts/questions live only in the client harness**.
 - **GAP**: without the G7(a) correlation, "everything they did" can't be reconstructed end-to-end; oversized (>256 KB) result payloads are truncated (no S3 offload built).
 
 ### G9. Eval not trustworthy yet (AIA-1380)
@@ -91,10 +91,10 @@ value residual controls are **audit (G2)**, **privacy notice + retention (G3)**,
 
 ## Fresh security + data-capture pass (2026-09-21)
 
-### 🟠 G13. JChat lets every USER add their own MCP servers — data-exfiltration surface
-- **Found**: `librechat.railway.yaml` `interface.mcpServers: { use: true, create: true }`, synced into the USER role at startup (PR #23 + `MCPServersRegistry.addServer`). So **every** USER (all Jaipuria staff, and students in Phase 2) can register an **arbitrary MCP server** from the UI.
-- **Risk**: a user can point JChat at a **malicious/external MCP** and have their conversation context / tool outputs (incl. any student data pulled via the Moodle MCP) sent to an endpoint they control — an exfiltration/SSRF-shaped surface at 5,000-user scale. Not specific to our MCP, but it widens the blast radius of the open-access Moodle data.
-- **Recommendation**: set `interface.mcpServers.create: false` for USER (keep `use: true`) so only admins register servers, **or** gate `create` behind a faculty/admin sub-role. Decision for Rajika/data-owner. *(JChat config — 1 line)*
+### 🟠 G13. A client harness that lets every USER add their own MCP servers — data-exfiltration surface
+- **Found (historical, re the former LibreChat-based client):** `interface.mcpServers: { use: true, create: true }` synced into the USER role at startup meant **every** USER could register an **arbitrary MCP server** from the UI. Re-check whichever client is adopted next for the same setting.
+- **Risk**: a user can point such a client at a **malicious/external MCP** and have their conversation context / tool outputs (incl. any student data pulled via the Moodle MCP) sent to an endpoint they control — an exfiltration/SSRF-shaped surface at 5,000-user scale. Not specific to our MCP, but it widens the blast radius of the open-access Moodle data.
+- **Recommendation**: on whichever client is adopted, ensure USER cannot self-register MCP servers (admins only), **or** gate it behind a faculty/admin sub-role. Decision for Rajika/data-owner. *(client config)*
 
 ### ✅ G14. Connection capture — FIXED (2026-09-21)
 - **Was**: `GuardMiddleware` implemented only `on_call_tool`, so the audit ledger counted tool *invocations*, not *connections* — a connect-but-no-call left no trace (gap vs AIA-1210 "connection counts").

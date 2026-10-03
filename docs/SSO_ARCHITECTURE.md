@@ -8,7 +8,7 @@ worth considering are in §4.
 ## 1. The crucial shape difference
 | | HireOS | Moodle MCP |
 | --- | --- | --- |
-| Role in OAuth | **Relying Party** (BFF) — a web server that logs a human browser in | **Authorization Server + proxy** — machine clients (Claude.ai, JChat, Jaipuria OS) are the RPs; we proxy to Google |
+| Role in OAuth | **Relying Party** (BFF) — a web server that logs a human browser in | **Authorization Server + proxy** — machine clients (Claude.ai, Jaipuria OS) are the RPs; we proxy to Google |
 | Who initiates | a browser hits our `/login` | an MCP client runs **Dynamic Client Registration + PKCE** against our `/register`,`/authorize`,`/token` |
 | Transport | httpOnly session cookies in a browser | bearer tokens between machines (no browser, no cookies) |
 | Library | hand-rolled RP on `jose` (their own design doc said *don't* hand-roll) | **FastMCP `GoogleProvider`/OAuthProxy** — a vetted library does the token validation |

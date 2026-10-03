@@ -1,8 +1,8 @@
 """LLM-blind PII tokenisation (AIA-1386 / AIA-1356, MCP side).
 
 The MCP is the authoritative tokeniser: it holds the real values, so it can map a student's
-identity to a stable, opaque, deterministic token (`student_ref`) with no fuzzy NER. The harness
-(JChat) feeds only tokens to the model and rehydrates them for the authorised human afterwards —
+identity to a stable, opaque, deterministic token (`student_ref`) with no fuzzy NER. The client
+harness feeds only tokens to the model and rehydrates them for the authorised human afterwards —
 so the model never sees a real name or enrolment id, but access scope and the human's view are
 unchanged (PII-blindness is orthogonal to authorisation).
 

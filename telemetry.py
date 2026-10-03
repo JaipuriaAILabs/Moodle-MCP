@@ -12,7 +12,7 @@ inert unless the key is set:
   ``mcp.tool`` / ``mcp.outcome`` / ``mcp.error_code`` / ``mcp.campus_scope`` and an
   ERROR status on failure; plus an ``mcp.auth`` span per authentication. New Relic
   derives duration.ms, error, throughput and percentiles from these. Incoming W3C
-  ``traceparent`` is honoured so a JChat/Claude client span stitches to ours.
+  ``traceparent`` is honoured so a client harness span stitches to ours.
 * **Metrics** — host + process gauges (CPU, memory, RSS, open FDs …) via the system-
   metrics instrumentation, plus app instruments: a tool-call counter (by outcome) and
   a tool-duration histogram. These give capacity/saturation signal that spans alone
@@ -248,7 +248,7 @@ def shutdown_telemetry() -> None:
 
 def extract_context(headers):
     """Parse an incoming W3C ``traceparent`` (case-insensitive dict of request headers)
-    into an OTel Context so a tool span becomes a child of the caller's (JChat/Claude)
+    into an OTel Context so a tool span becomes a child of the caller's (client harness)
     span — stitching a distributed trace. None/unparseable → default context. Never
     raises."""
     if not headers:

@@ -40,7 +40,7 @@ python3 scripts/seed_faculty_roster.py your_roster.csv --dry-run   # preview
 Render → **Logs** → search `RBAC`. Expect:
 `per-campus RBAC mode: enforce …` and `RBAC ENFORCE — access is role/campus-scoped …`.
 
-## Step 3 — verify behaviour (via your connector: Claude.ai / JChat / Jaipuria OS)
+## Step 3 — verify behaviour (via your connector: Claude.ai / Jaipuria OS)
 - **You (admin):** `whoami` → `role: admin`, `campuses: all`; a data query works.
 - **A provisioned campus faculty:** sees only their campus; a query for another campus returns nothing.
 - **An unprovisioned user:** `whoami` → `role: pending` + a note; data tools say access denied;

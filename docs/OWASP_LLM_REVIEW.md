@@ -61,7 +61,7 @@ flowing to an external LLM in `create_report` (DPDP), tracked in AIA-1386.
 
 ## Pass / N/A
 - **LLM08 Hidden Context Exposure — PASS.** No secrets in prompts/tool descriptions; authz is enforced in deterministic code (`principal_from_claims`, campus filter, roster deny), never by prompt text.
-- **LLM10 Improper Output Handling — PASS (MCP).** All DB access is parameterized (Supabase query builder; no raw SQL/`eval`/`exec`/`subprocess`). The report HTML renderer (`moodle-agent`) uses `esc()` + `jdump` (escapes `</`) + `Cache-Control: no-store` + no-script CSP (verified, GAP G5). *JChat-side note:* the calling client must sanitize markdown / disable auto-fetching image renderers (LLM10 exfil via URL) — a JChat item, not the MCP's.
+- **LLM10 Improper Output Handling — PASS (MCP).** All DB access is parameterized (Supabase query builder; no raw SQL/`eval`/`exec`/`subprocess`). The report HTML renderer (`moodle-agent`) uses `esc()` + `jdump` (escapes `</`) + `Cache-Control: no-store` + no-script CSP (verified, GAP G5). *Client-side note:* the calling client harness must sanitize markdown / disable auto-fetching image renderers (LLM10 exfil via URL) — a client item, not the MCP's.
 - **LLM05 Data & Model Poisoning — N/A.** No training/fine-tuning; data from trusted Moodle snapshots.
 - **LLM09 Vector & Embedding Weaknesses — N/A.** No vector DB / embeddings in the MCP.
 
@@ -77,7 +77,7 @@ flowing to an external LLM in `create_report` (DPDP), tracked in AIA-1386.
 | LLM07 Misinformation | Finding (Low — mitigated) |
 | LLM08 Hidden Context Exposure | Pass |
 | LLM09 Vector/Embedding | N/A |
-| LLM10 Improper Output Handling | Pass (MCP); JChat note |
+| LLM10 Improper Output Handling | Pass (MCP); client note |
 
 ## Top 3 fixes (priority; blast-radius first)
 1. **Turn on recording** (`SUPABASE_AUDIT_KEY`) — the accountability control the accepted all-access model depends on. *(ops)*

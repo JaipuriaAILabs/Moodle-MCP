@@ -3,7 +3,7 @@
 Owner: Mansi · Epic: AIA-1012 · Status: Phase 1–2 implemented (flag-gated, off by default)
 
 Goal: capture everything users do through the Moodle MCP once it is exposed to
-~5,000 Jaipuria students + professors via JChat, for adoption analytics, support,
+~5,000 Jaipuria students + professors via the client harness, for adoption analytics, support,
 and security review. Access stays open to every verified Jaipuria ID (data-owner
 decision, 2026-09-14) — so capture, not access control, is the lever here.
 
@@ -12,9 +12,9 @@ decision, 2026-09-14) — so capture, not access control, is the lever here.
 | Plane | What it holds | Where it lives |
 |-------|---------------|----------------|
 | **A. MCP tool activity** | which tool, arguments (which student), result, timing, identity, client/IP | our `mcp_audit` schema — **ours to enrich (this doc)** |
-| **B. Conversation context** | the user's actual prompts, model replies, tokens, files, cost | **JChat already logs it** — MongoDB Atlas + New Relic 8379209 (`[Usage]`, `JChatUser/Balance/Transaction`, winston `userId`/`requestId`) |
+| **B. Conversation context** | the user's actual prompts, model replies, tokens, files, cost | **the harness logs it** (on whichever client is in use) |
 
-JChat runs the agent loop, so its agent-run records already hold our tool calls +
+The harness runs the agent loop, so its agent-run records already hold our tool calls +
 results keyed to the real user — a second, identity-linked copy of Plane A. The
 value is correlating the two on a shared `x-request-id` / email.
 
@@ -59,12 +59,12 @@ the data needs no migration — only this convenience layer does.
   paid/dashboard action — ops.)*
 - **Phase 2 — rich capture (code):** done — this change. Apply the migration when the
   query layer is wanted.
-- **Phase 3 — identity spine + JChat correlation:** thread one `x-request-id` from a
-  JChat turn → MCP call so Plane A/B join; confirm JChat Mongo message + agent-run
+- **Phase 3 — identity spine + harness correlation:** thread one `x-request-id` from a
+  harness turn → MCP call so Plane A/B join; confirm the harness's own message + agent-run
   retention and `MONGO_SYNC`.
 - **Phase 4 — live telemetry:** add OpenTelemetry to the MCP → New Relic EU (8495484):
   per-tool latency/throughput/error-rate, active users, tool-usage mix, alerts;
-  `trace_id` join to the gateway/JChat.
+  `trace_id` join to the gateway/harness.
 - **Phase 5 — analytics surface:** views/dashboard — per-user activity timeline,
   most-queried students, tool-usage funnel, adoption/DAU, error hotspots.
 

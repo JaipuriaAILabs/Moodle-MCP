@@ -207,7 +207,7 @@ class Settings(BaseSettings):
     # (HMAC token) for each student instead of the name/enrolment id, plus a stripped
     # `_identity` side-map, so a model never sees real identity (rehydrated by the harness
     # outside the model — AIA-1356). Default OFF: the MCP-side tokeniser + resolve_identities
-    # tool ship dormant until the JChat/harness side is wired. Dedicated key, else audit key.
+    # tool ship dormant until the client harness side is wired. Dedicated key, else audit key.
     pii_tokenize: bool = Field(default=False, alias="MCP_PII_TOKENIZE")
     pii_hmac_key: str = Field(default="", alias="MCP_PII_HMAC_KEY")
 

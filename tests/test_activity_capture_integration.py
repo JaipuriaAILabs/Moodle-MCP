@@ -88,7 +88,7 @@ settings.supabase_anon_key = ""
 
 PRIN = {"email": "faculty@jaipuria.ac.in", "name": "A Faculty", "campuses": None,
         "role": "cross_campus", "can_generate": True}
-HDRS = {"user-agent": "JChat/1.0", "mcp-session-id": "sess-abc", "x-request-id": "req-1"}
+HDRS = {"user-agent": "Harness/1.0", "mcp-session-id": "sess-abc", "x-request-id": "req-1"}
 ARGS = {"params": {"student_id": "Aashna Gupta", "campus": "Jaipur"}}
 
 ok = asyncio.run(audit_store.record_tool_call(
@@ -128,7 +128,7 @@ print("\n[ 3. live GuardMiddleware wiring (patched deps) ]")
 import fastmcp.server.dependencies as _deps  # noqa: E402
 
 # get_http_headers is imported *inside* build_middleware at call time, so patch first.
-_deps.get_http_headers = lambda: {"user-agent": "JChat/1.0", "x-request-id": "req-9",
+_deps.get_http_headers = lambda: {"user-agent": "Harness/1.0", "x-request-id": "req-9",
                                   "x-forwarded-for": "9.9.9.9, 10.0.0.1"}
 security.resolve_oauth_principal = lambda: PRIN
 

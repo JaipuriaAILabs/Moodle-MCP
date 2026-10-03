@@ -1,16 +1,16 @@
-# Moodle MCP — production readiness plan (5,000 Jaipuria users via JChat)
+# Moodle MCP — production readiness plan (5,000 Jaipuria users via a client harness)
 
 Scope: take the Moodle MCP from "works for a demo / a few faculty" to "safe and
-reliable for ~5,000 students + professors through JChat." Grouped by priority with
+reliable for ~5,000 students + professors through a client harness." Grouped by priority with
 owner and rough effort. **P0 = launch blocker.** Synthesised from the Sept 2026
-hardening + JChat-integration + activity-recording work.
+hardening + client-integration + activity-recording work.
 
 > Updated 2026-10-01: repository security closure and current validation evidence are in
 > `SECURITY_AUDIT_2026-10-01.md`. Items below marked as code-complete still require their stated
 > production configuration or institutional approval.
 
 Legend — owner: **ops** (Render/Supabase/env, not doable from code), **eng** (this
-repo), **rajika** (JChat repo), **decision** (data owner).
+repo), **rajika** (client-harness repo), **decision** (data owner).
 
 ---
 
@@ -34,11 +34,11 @@ so **nothing is recorded today**. → Follow `scripts/RECORDING_ENABLEMENT.md`: 
 `sql/2026-09-18_mcp_audit_backend.sql`, mint the `mcp_audit_writer` JWT, set the audit +
 capture env. *(ops/eng · ½ day)*
 
-**0.4 Fix rate limiting for the JChat topology.** All JChat MCP traffic egresses **one
+**0.4 Fix rate limiting for the harness topology.** If harness MCP traffic egresses **one
 Railway IP**, so the per-IP cap (`MCP_IP_RATE_LIMIT` = 1200/min ≈ 20 rps) becomes the
 ceiling for *all* users and will throttle the cohort. And with >1 instance the
 in-process limiter diverges. → Set `MCP_REDIS_URL` for shared limiting, and either raise
-the per-IP cap substantially for the trusted JChat origin **or** cut traffic over to the
+the per-IP cap substantially for the trusted harness origin **or** cut traffic over to the
 governed gateway (`GATEWAY_ENFORCED`, single trusted ingress). Per-principal 90/min
 still bounds each user. *(ops + eng · 1 day)*
 
@@ -84,11 +84,10 @@ alerts. The `mcp_audit` ledger + `v_activity` view remain the detailed activity 
 **1.3 CI gate (done).** GitHub Actions runs the repository tests on PRs/pushes and now includes
 `pip-audit` plus Bandit; Dependabot covers Python and Actions dependencies. *(eng shipped)*
 
-**1.4 JChat prompt correlation.** Add the `X-Request-Id` header (see
-`docs/JCHAT_PROMPT_CORRELATION.md`) so activity joins to the prompt that caused it.
+**1.4 Prompt correlation.** Stamp each MCP call with a per-turn `X-Request-Id` header from the client harness so activity joins to the prompt that caused it.
 *(rajika · 1 h)*
 
-**1.5 `jaipuriaschools.ac.in` handling.** JChat admits that domain as USER, but the MCP
+**1.5 `jaipuriaschools.ac.in` handling.** The harness may admit that domain as USER, but the MCP
 denies it (not a subdomain of `jaipuria.ac.in`). Confirm that's intended (schools staff
 have no MBA data) and that the denial is a clean, explained message, not an error.
 *(decision · 15 min)*
@@ -127,7 +126,7 @@ service actually reconnects OAuth sessions across deploys now that keys are pinn
 6. [ ] Report queue + worker; moodle-agent off free plan (1.1)
 7. [ ] New Relic health/error/latency alerts live (1.2)
 8. [x] CI running tests plus dependency/static security scans on PRs (1.3)
-9. [ ] JChat `X-Request-Id` header deployed; join verified (1.4)
+9. [ ] Client-harness `X-Request-Id` header deployed; join verified (1.4)
 10. [ ] Cohort ramp 150 → 500 → 5,000 with monitoring (2.5)
 
 ## Status snapshot (2026-09-18)
@@ -146,4 +145,4 @@ service actually reconnects OAuth sessions across deploys now that keys are pinn
   signed identity-free access notifications, and report capability-link rate limiting/auditing.
 - **Awaiting ops/decision:** paid-plan verification, stable production keys, Redis/gateway choice,
   migration/capture/retention activation, real grant seeding and ENFORCE cutover, New Relic alert
-  creation, live privacy notice, JChat correlation, restore drill, and cohort load test.
+  creation, live privacy notice, prompt correlation, restore drill, and cohort load test.

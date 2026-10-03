@@ -38,7 +38,7 @@ the DB**, so we know the exact strings ("Aashna Gupta", "JN25MM002", the email).
   only for free-text (the user's prompt).
 
 ## 4. The reinsertion mechanism (answering Shiva's open question)
-Request-scoped, in the JChat→LLM path:
+Request-scoped, in the harness→LLM path:
 1. **Inbound:** scan the outgoing LLM request (user prompt **and** MCP tool results) for PII.
    Replace each unique value with a stable opaque token — e.g. `⟦S1⟧`, `⟦ID1⟧` — and store
    `{token → original}` in a **request-scoped, in-memory vault** (keyed by request id, never
@@ -55,7 +55,7 @@ Making reinsertion **robust** (the actual engineering):
   so the narrative stays coherent.
 - **Rehydration misses** (model dropped/mangled a token): fall back gracefully ("the student"),
   and emit a `pii.rehydration_miss` metric so misses are visible, not silent.
-- **Streaming**: JChat streams tokens; a placeholder can span chunks. Buffer on the `⟦…⟧`
+- **Streaming**: the harness streams tokens; a placeholder can span chunks. Buffer on the `⟦…⟧`
   boundary before flushing, or rehydrate on a small trailing window. (This is the fiddliest part
   and the reason to prototype early.)
 - **Structured alternative** (more robust than free-text echo): have the model return structured
@@ -68,12 +68,12 @@ moodle-agent stitches the real name into the final report template at render tim
 proxy needed for the highest-volume identifier exposure — a clean, use-case-specific redaction.
 
 ## 6. Architecture — where it lives
-The DPDP-sensitive hop is **JChat → OpenRouter → model** (external). MCP→JChat is first-party,
-in-region (fine to carry real data). So the mechanism belongs in **JChat's model-call pipeline
+The DPDP-sensitive hop is **harness → OpenRouter → model** (external). MCP→harness is first-party,
+in-region (fine to carry real data). So the mechanism belongs in **the harness's model-call pipeline
 or the gateway it calls** — Rajika's domain, tied to **AIA-1356** (Portkey guardrails).
 Options, best first:
-- **A. Reversible pseudonymization middleware in JChat's LLM path** (LibreChat request/response
-  hook, or a thin proxy JChat points at instead of Portkey directly). Full control of the token
+- **A. Reversible pseudonymization middleware in the harness's LLM path** (a request/response
+  hook, or a thin proxy the harness points at instead of Portkey directly). Full control of the token
   vault + streaming. **Recommended.**
 - **B. Portkey custom guardrail pair** (before/after hooks) — only if Portkey hooks can share a
   request-scoped store; most hook systems are stateless, so the vault is awkward. Usable as the
@@ -96,7 +96,7 @@ Independent of the token mechanism, these cut DPDP risk immediately:
 - **Phase 0 — now / at launch (governance, low effort):** §7 — zero-retention routes, gateway
   logging off, DPA/cross-border check, minimization, notice update. *(You + Rajika)*
 - **Phase 1 — as inflow grows (the mechanism):** MCP tags PII fields (§3); build the reversible
-  pseudonymization middleware in JChat's LLM path (§4 option A); ship the `create_report`
+  pseudonymization middleware in the harness's LLM path (§4 option A); ship the `create_report`
   template quick win (§5) first as the highest-value, lowest-risk slice. *(Rajika + Me for MCP
   tagging)*
 - **Phase 2 — hardening:** streaming rehydration, rehydration-miss metrics + fallback, a
@@ -116,6 +116,6 @@ Independent of the token mechanism, these cut DPDP risk immediately:
 
 ## 10. One-line summary
 Redact by **reversibly pseudonymizing the identifiers we already know** (not the marks), with a
-**request-scoped token vault** that rehydrates the response in JChat's LLM path; start with
+**request-scoped token vault** that rehydrates the response in the harness's LLM path; start with
 governance (zero-retention routes + notice) at launch and the `create_report` template trick,
 then generalize as inflow grows. Ties to **AIA-1356**.

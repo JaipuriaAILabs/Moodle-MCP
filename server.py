@@ -148,7 +148,7 @@ async def get_authenticated_service():
 
     import telemetry
     _headers = get_http_headers() or {}
-    # Parent to the caller's (JChat/Claude) span when it propagated a W3C traceparent.
+    # Parent to the caller's (client harness) span when it propagated a W3C traceparent.
     span = telemetry.start_span("mcp.auth", _headers)  # None unless OTel tracing is enabled
     mode = "oauth" if settings.oauth_enabled() else "static"
     try:

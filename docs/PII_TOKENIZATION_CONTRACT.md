@@ -1,7 +1,7 @@
 # LLM-blind PII — MCP ↔ harness contract (AIA-1386 / AIA-1356)
 
 The model must never see a student's name or enrolment id; it reasons over opaque **refs**, which the
-harness (JChat) rehydrates for the authorised human outside the model. The **MCP is the authoritative
+harness rehydrates for the authorised human outside the model. The **MCP is the authoritative
 tokeniser** (it has the real values → exact, no NER). This doc is the contract the harness integrates
 against. PII-blindness is orthogonal to authorisation — a director's model still sees refs.
 
@@ -19,7 +19,7 @@ key), opaque, one-way. The MCP holds the key (`MCP_PII_HMAC_KEY`, else the audit
    (`student_id`, `student_name`, `student_email`, `name` on student records) replaced by the ref, plus
    a top-level **`_identity`**: `{ ref: {student_id, student_name, …} }`.
 
-## Harness responsibilities (AIA-1356, JChat side — the part the MCP can't do)
+## Harness responsibilities (AIA-1356, client-harness side — the part the MCP can't do)
 1. **Strip `_identity`** from every tool result **before** passing the result to the model (keep it in a
    per-turn, in-memory vault keyed by ref). The model sees only refs.
 2. **Prompt in:** resolve user-typed names → refs (via `resolve_identities`); send refs to the model.

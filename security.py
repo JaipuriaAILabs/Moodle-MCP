@@ -578,7 +578,7 @@ def _start_tool_span(name: str, headers=None):
     provider installed (telemetry disabled) this is a cheap non-recording span. The
     tracer is fetched lazily so it always uses whatever provider setup_telemetry set.
     When ``headers`` carry a W3C traceparent, the span is parented to the caller's
-    (JChat/Claude) span so a distributed trace stitches end-to-end."""
+    (client harness) span so a distributed trace stitches end-to-end."""
     if _otel_trace is None:
         return None
     span = None

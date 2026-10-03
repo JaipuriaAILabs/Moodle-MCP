@@ -69,7 +69,7 @@ Move every runtime var. Secrets via `wrangler secret put NAME`; non-secret flags
 ## 3. Staging deploy + test (before DNS)
 1. `wrangler deploy` → get `jaipuria-os-moodle-mcp.ailabs-c94.workers.dev`.
 2. Point `MCP_SERVER_BASE_URL` at the **final** hostname (`https://moodle-mcp.tryrehearsal.ai`) even while testing on workers.dev, so issued OAuth metadata is correct.
-3. Test on the workers.dev URL: Claude.ai connector (list tools + 1 read + 1 write), Jaipuria OS (Gatekeepers → MCP Server → + ), LibreChat `create_report` end-to-end.
+3. Test on the workers.dev URL: Claude.ai connector (list tools + 1 read + 1 write), Jaipuria OS (Gatekeepers → MCP Server → + ) `create_report` end-to-end.
 4. **Client-IP fix note:** behind CF, read `CF-Connecting-IP` for the real client IP in `security._source_ip` (currently records the CF edge IP). Do this as part of the move.
 
 ## 4. Cutover

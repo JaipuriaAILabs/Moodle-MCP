@@ -107,7 +107,7 @@ within a tenant; reversible only via the map we hold, never by the model.
   `_identity: { "S_7f3a": {"name": "...", "student_id": "..."} }` in a conventionally-named field the
   harness strips. Because the MCP has the real values, this is exact and deterministic — no fragile NER.
   Add a helper tool `resolve_identities(names|ids) -> refs` so the harness can tokenise a prompt.
-- **Harness (JChat / gateway — Rajika, AIA-1356):** enforces LLM-blindness around the model —
+- **Harness (gateway — Rajika, AIA-1356):** enforces LLM-blindness around the model —
   strips `_identity` before the model sees a tool result, substitutes prompt names→refs *before* the
   call (via `resolve_identities`), and **rehydrates** refs→names in the model's output for the authorised
   human. The MCP→harness hop is first-party/in-region; only the harness→LLM hop is the external boundary.
@@ -160,7 +160,7 @@ privacy notice, and run two-user cross-campus plus two-student isolation smokes 
 service. Repository state cannot prove those live-environment steps.
 
 Suggested next build order: **P1 + P2 together** (so pseudonymization is end-to-end), then **D1**.
-P2 requires the JChat/harness source, which is not present in either attached repository; do not ship
+P2 requires the harness source, which is not present in either attached repository; do not ship
 P1 alone and call it a privacy boundary. Keep each change flag-gated through shadow→enforce rollout.
 
 ---
