@@ -128,17 +128,20 @@ def graded_scopes(svc, campus=None, batch=None):
     caller's grant, newest run first. Optionally narrowed to one campus and/or batch.
     This is the set a report can actually be built from (roster-only batches excluded)."""
     from config import settings
-    self_batch = getattr(svc, "self_batch", None)
-    if self_batch is not None and batch is not None and batch != self_batch:
-        return []
+    self_batches = getattr(svc, "self_batches", None)
+    if self_batches and batch is not None and str(batch).strip() not in self_batches:
+        return []  # a student asked for a batch that isn't one of their own
     q = (svc.client.table("extraction_runs")
          .select("campus,batch,run_id,finished_at")
          .eq("status", "completed").eq("purpose", settings.report_purpose)
          .not_.is_("finished_at", "null")
          .order("finished_at", desc=True).limit(200))
     q = svc.apply_campus(q, requested=campus)
-    if batch or self_batch:
-        q = q.eq("batch", batch or self_batch)
+    if batch:
+        q = q.eq("batch", batch)
+    elif self_batches:  # student named none -> their own batch(es) only
+        bs = sorted(self_batches)
+        q = q.eq("batch", bs[0]) if len(bs) == 1 else q.in_("batch", bs)
     rows = q.execute().data or []
     seen, out = set(), []
     for r in rows:  # newest-first: first per (campus,batch) is the live snapshot

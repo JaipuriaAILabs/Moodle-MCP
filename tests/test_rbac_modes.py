@@ -53,9 +53,10 @@ def reset(rows=None, students=()):
         return email in students
 
     def fetch_identity(email):
+        # Returns a LIST of roster rows (a person may hold >1 enrolment id). Default: one row.
         if email in students:
-            return {"student_id": "ID_" + email.split("@")[0], "campus": "noida", "batch": "2024-26"}
-        return None
+            return [{"student_id": "ID_" + email.split("@")[0], "campus": "noida", "batch": "2024-26"}]
+        return []
 
     faculty._fetch_faculty_row = fetch_row
     faculty._fetch_student_hit = fetch_student
@@ -306,11 +307,42 @@ check("student with unresolvable identity -> denied (never unbounded)",
 # A partial roster identity is also denied: student id alone is not enough to
 # constrain non-student-bearing scope metadata such as runs and course names.
 reset(students={"partial@jaipuria.ac.in"})
-faculty._fetch_student_identity = lambda e: {
+faculty._fetch_student_identity = lambda e: [{
     "student_id": "ID_partial", "campus": "noida", "batch": ""
-}
+}]
 check("student with missing batch -> denied (never partially scoped)",
       principal_from_claims(claims("partial@jaipuria.ac.in")) is None)
+
+# A student with MULTIPLE enrolment ids is scoped to ALL of them (still only their own rows).
+reset(students={"multi@jaipuria.ac.in"})
+faculty._fetch_student_identity = lambda e: [
+    {"student_id": "JN24SM073", "campus": "noida", "batch": "2024-26"},
+    {"student_id": "JJ24SM041", "campus": "jaipur", "batch": "2024-26"},
+]
+mp = principal_from_claims(claims("multi@jaipuria.ac.in"))
+check("multi-id student -> scoped to all their enrolment ids",
+      mp is not None and mp["student_ids"] == ["JN24SM073", "JJ24SM041"]
+      and mp["student_id"] == "JN24SM073"            # primary = latest row
+      and sorted(mp["campuses"]) == ["jaipur", "noida"])
+msvc = MoodleService(None, mp)
+
+
+class _FakeInQ:
+    def __init__(self):
+        self.ins = []
+
+    def in_(self, col, vals):
+        self.ins.append((col, list(vals)))
+        return self
+
+    def eq(self, col, val):
+        self.ins.append(("eq", col, val))
+        return self
+
+check("multi-id apply_student uses IN over all ids",
+      msvc.apply_student(_FakeInQ()).ins == [("student_id", ["JN24SM073", "JJ24SM041"])])
+check("multi-id campus scope spans both campuses, denies a third",
+      msvc.campus_scope("jaipur") == ["jaipur"] and msvc.campus_scope("lucknow") == [])
 
 print("Audience binding — a token minted for another Google app is rejected")
 set_mode("off")

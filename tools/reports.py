@@ -159,17 +159,20 @@ def _availability_impl(svc, p: AvailabilityParams) -> dict:
     snapshot time, roster size, and the trimesters covered by that snapshot."""
     if p.campus and svc.campus_scope(p.campus) == []:
         return not_found("scope")
-    self_batch = getattr(svc, "self_batch", None)
-    if self_batch is not None and p.batch is not None and p.batch != self_batch:
-        return not_found("scope")
+    self_batches = getattr(svc, "self_batches", None)
+    if self_batches and p.batch is not None and str(p.batch).strip() not in self_batches:
+        return not_found("scope")  # a student asked for a batch that isn't one of their own
     q = (svc.client.table("extraction_runs")
          .select("campus,batch,run_id,finished_at")
          .eq("status", "completed").eq("purpose", settings.report_purpose)
          .not_.is_("finished_at", "null")
          .order("finished_at", desc=True).limit(200))
     q = svc.apply_campus(q, requested=p.campus)
-    if p.batch or self_batch:
-        q = q.eq("batch", p.batch or self_batch)
+    if p.batch:
+        q = q.eq("batch", p.batch)
+    elif self_batches:  # student named none -> their own batch(es) only
+        bs = sorted(self_batches)
+        q = q.eq("batch", bs[0]) if len(bs) == 1 else q.in_("batch", bs)
     runs = q.execute().data or []
     latest, order = {}, []
     for r in runs:  # newest-first: first hit per scope is the live snapshot

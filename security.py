@@ -110,15 +110,21 @@ def _student_principal(claims: dict, email: str):
         return None
     import faculty as registry
     ident = registry.student_identity(email)
-    # All three keys are required.  A partial principal would still self-filter
-    # student-bearing rows, but a missing campus/batch could expose unowned scope
-    # metadata (runs, course names, trimester availability).  Fail closed instead.
-    if not ident or not all(ident.get(key) for key in ("student_id", "campus", "batch")):
+    # The identity must resolve to at least one complete (id, campus, batch) — student_identity
+    # already denies any incomplete roster row. A partial principal could expose unowned scope
+    # metadata (runs, course names, trimester availability), so fail closed.
+    if not ident or not all(ident.get(k) for k in ("student_ids", "campuses", "batches")):
         return None
     return {"name": claims.get("name") or email, "email": email,
-            "campuses": [ident["campus"]],
-            "role": "student", "student_id": ident["student_id"],
-            "batch": ident["batch"], "can_generate": True}
+            # Scope spans ALL of this person's enrolment ids (and their campuses/batches) —
+            # still strictly their own rows, never another student's.
+            "campuses": list(ident["campuses"]),
+            "role": "student",
+            "student_ids": list(ident["student_ids"]),
+            "student_id": ident["primary_id"],      # primary (latest): create_report target + cache key
+            "batches": list(ident["batches"]),
+            "batch": ident["primary_batch"],         # primary batch: default when none is named
+            "can_generate": True}
 
 
 def _pending_principal(claims: dict, email: str) -> dict:

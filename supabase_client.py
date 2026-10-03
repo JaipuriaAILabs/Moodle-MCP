@@ -58,22 +58,40 @@ class MoodleService:
         self.role = principal.get("role") or ("cross_campus" if campuses is None else "faculty")
         self.can_generate = bool(principal.get("can_generate", True))
         # Student self-access boundary: when set, EVERY student-identifiable query is hard-filtered
-        # to this student_id, so a student can only ever see their own rows (never another's).
-        self.self_student_id = (
-            str(principal["student_id"]).strip()
-            if principal.get("role") == "student" and principal.get("student_id") else None
+        # to this person's OWN enrolment id(s) — a student can only ever see their own rows (across
+        # all their enrolment ids), never another student's.
+        is_student = principal.get("role") == "student"
+        raw_ids = principal.get("student_ids") or (
+            [principal["student_id"]] if principal.get("student_id") else [])
+        self.self_student_ids = (
+            [str(i).strip() for i in raw_ids if str(i).strip()] if is_student and raw_ids else None
         )
+        # Primary id (latest enrolment): create_report target + per-student cache-key segregation.
+        self.self_student_id = self.self_student_ids[0] if self.self_student_ids else None
+        raw_batches = principal.get("batches") or (
+            [principal["batch"]] if principal.get("batch") else [])
+        self.self_batches = (
+            {str(b).strip() for b in raw_batches if str(b).strip()} if self.self_student_ids else None
+        )
+        # Primary batch (latest): the default batch filter when a student names none.
         self.self_batch = (
-            str(principal["batch"]).strip()
-            if self.self_student_id and principal.get("batch") else None
+            (str(principal.get("batch") or "").strip() or None) if self.self_student_ids else None
         )
 
     def apply_student(self, query, col: str = "student_id"):
-        """Bound a query to the caller's own student_id when they are a student; no-op otherwise.
-        This is the per-student boundary — applied in every data helper so no tool can bypass it."""
-        if self.self_student_id is None:
+        """Bound a query to the caller's own enrolment id(s) when they are a student; no-op
+        otherwise. This is the per-student boundary — applied in every data helper so no tool can
+        bypass it. A single id uses .eq (unchanged for the common case); multiple use .in_."""
+        if not self.self_student_ids:
             return query
-        return query.eq(col, self.self_student_id)
+        if len(self.self_student_ids) == 1:
+            return query.eq(col, self.self_student_ids[0])
+        return query.in_(col, self.self_student_ids)
+
+    def student_batch_denied(self, requested) -> bool:
+        """True when a student explicitly requests a batch that is not one of their own."""
+        return bool(self.self_batches) and requested is not None \
+            and str(requested).strip() not in self.self_batches
 
     # --- campus scoping ---------------------------------------------------
     def campus_scope(self, requested: str | None):
@@ -101,7 +119,7 @@ class MoodleService:
         # forgets the explicit campus_scope() guard can never leak another campus.
         if self.campus_scope(campus) == []:
             return None
-        if self.self_batch is not None and batch != self.self_batch:
+        if self.self_batches is not None and str(batch).strip() not in self.self_batches:
             return None
         purpose = purpose or settings.report_purpose
         key = (campus, batch, purpose)

@@ -64,40 +64,62 @@ def _fetch_student_hit(email: str) -> bool:
 
 
 def _fetch_student_identity(email: str):
-    # Emails repeat across batch snapshots; take the most recent batch's row. student_id is
-    # the stable per-person key that bounds every student query.
-    rows = (_sb().table("students").select("student_id,campus,batch")
-            .ilike("student_email", email).order("batch", desc=True).limit(1).execute()).data
-    return rows[0] if rows else None
+    # Return ALL roster rows for this email: one person may hold more than one enrolment id
+    # (e.g. across programs/campuses), and the email also repeats across run snapshots. Newest
+    # batch first, so row[0] is the primary; the caller dedupes by student_id.
+    return (_sb().table("students").select("student_id,campus,batch")
+            .ilike("student_email", email).order("batch", desc=True).execute()).data or []
+
+
+def _copy_ident(d):
+    """Shallow-copy with fresh list values so a cached identity can't be mutated by a caller."""
+    return {k: (list(v) if isinstance(v, list) else v) for k, v in d.items()}
 
 
 def student_identity(email: str):
-    """For a student email -> {'student_id','campus','batch'} self-scope, else None.
-    Fail-closed on error (None) WITH last-known-good grace, so a roster-DB blip neither
-    invents access nor needlessly drops a known student mid-session."""
+    """For a student email -> the self-scope across ALL their enrolment ids:
+    {'student_ids':[...], 'campuses':[...], 'batches':[...], 'primary_id', 'primary_batch'},
+    else None. Fail-closed on error WITH last-known-good grace, so a roster-DB blip neither
+    invents access nor needlessly drops a known student mid-session. A row missing a
+    campus/batch denies the WHOLE identity (a partially scoped student could otherwise read
+    unowned run/course/trimester metadata)."""
     email = (email or "").strip().lower()
     if not email:
         return None
     hit = _student_ids.get(email)
     if hit is not None:
-        return None if hit == _ID_MISS else dict(hit)
+        return None if hit == _ID_MISS else _copy_ident(hit)
     try:
-        row = _fetch_student_identity(email)
+        rows = _fetch_student_identity(email)
     except Exception:  # noqa: BLE001
         stale = _stale_student_ids.get(email)
         if stale is not None:
-            return dict(stale)
+            return _copy_ident(stale)
         log.warning("student identity lookup failed for subject=%s — fail-closed", _subject(email))
         return None
-    if not row or not row.get("student_id"):
+    if not rows:
         _student_ids.set(email, _ID_MISS)
         return None
-    ident = {"student_id": row["student_id"],
-             "campus": (row.get("campus") or "").strip().lower(),
-             "batch": (row.get("batch") or "").strip()}
+    ids, campuses, batches = [], [], []
+    for r in rows:  # rows are batch-desc, so the first distinct id/batch is the primary
+        sid = (r.get("student_id") or "").strip()
+        campus = (r.get("campus") or "").strip().lower()
+        batch = (r.get("batch") or "").strip()
+        if not (sid and campus and batch):
+            log.warning("incomplete student roster row for subject=%s — denying", _subject(email))
+            _student_ids.set(email, _ID_MISS)
+            return None
+        if sid not in ids:
+            ids.append(sid)
+        if campus not in campuses:
+            campuses.append(campus)
+        if batch not in batches:
+            batches.append(batch)
+    ident = {"student_ids": ids, "campuses": campuses, "batches": batches,
+             "primary_id": ids[0], "primary_batch": (rows[0].get("batch") or "").strip()}
     _student_ids.set(email, ident)
     _stale_student_ids.set(email, ident)
-    return dict(ident)
+    return _copy_ident(ident)
 
 
 # --- public API ---------------------------------------------------------------

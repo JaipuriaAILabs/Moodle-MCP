@@ -62,7 +62,9 @@ class Client:
 
 class StudentService:
     self_student_id = "SELF"
+    self_student_ids = ["SELF"]
     self_batch = "2024-26"
+    self_batches = {"2024-26"}
     role = "student"
 
     def __init__(self, data):
