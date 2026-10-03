@@ -98,6 +98,45 @@ notices._http = _FailClient()
 check("notification outage returns false", asyncio.run(
     notices.notify_access_request(role="viewer", campuses=["jaipur"])) is False)
 
+print("\n[ email approver nudge (SMTP mocked, identity-free) ]")
+settings.access_request_webhook_url = ""      # isolate the email path
+settings.access_request_webhook_secret = ""
+settings.access_request_email_to = "mansi.gambhir@jaipuria.ac.in"
+settings.smtp_host = "smtp.example.test"
+settings.smtp_user = "noreply@jaipuria.ac.in"
+settings.smtp_pass = "x"
+settings.mail_from = "noreply@jaipuria.ac.in"
+mail = {}
+
+
+def _capture_smtp(role, campuses):
+    mail.update(role=role, campuses=list(campuses))
+
+
+notices._send_smtp = _capture_smtp
+check("email delivered when ACCESS_REQUEST_EMAIL_TO + SMTP_HOST set",
+      asyncio.run(notices.notify_access_request(role="faculty", campuses=["noida", "jaipur"])) is True)
+check("email carries role + campus only (no identity passed to the sender)",
+      mail == {"role": "faculty", "campuses": ["noida", "jaipur"]})
+
+settings.access_request_email_to = ""         # email disabled -> no-op
+check("email disabled is a no-op",
+      asyncio.run(notices.notify_access_request(role="faculty", campuses=["noida"])) is False)
+
+print("\n[ email failure does not raise ]")
+settings.access_request_email_to = "mansi.gambhir@jaipuria.ac.in"
+
+
+def _boom_smtp(role, campuses):
+    raise RuntimeError("smtp down — details must not surface")
+
+
+notices._send_smtp = _boom_smtp
+check("email outage returns false (best-effort, never raises)",
+      asyncio.run(notices.notify_access_request(role="viewer", campuses=["indore"])) is False)
+settings.access_request_email_to = ""
+settings.smtp_host = ""
+
 settings.access_request_webhook_url, settings.access_request_webhook_secret, notices._http = orig
 
 print(f"\n{PASS} passed, {FAIL} failed")

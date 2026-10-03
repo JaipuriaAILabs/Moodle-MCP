@@ -185,6 +185,19 @@ class Settings(BaseSettings):
         default="", alias="MCP_ACCESS_REQUEST_WEBHOOK_URL")
     access_request_webhook_secret: str = Field(
         default="", alias="MCP_ACCESS_REQUEST_WEBHOOK_SECRET")
+    # Access-request EMAIL nudge to the approver. Sends a PII-free "a request is pending"
+    # email (role + campus only) when a self-service request is filed; the requester identity
+    # stays in the admin-only queue. OFF unless ACCESS_REQUEST_EMAIL_TO and SMTP_HOST are set.
+    # SMTP_* var names mirror moodle-agent so the same credentials can be reused.
+    access_request_email_to: str = Field(default="", alias="MCP_ACCESS_REQUEST_EMAIL_TO")
+    smtp_host: str = Field(default="", alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, alias="SMTP_PORT")
+    smtp_user: str = Field(default="", alias="SMTP_USER")
+    smtp_pass: str = Field(default="", alias="SMTP_PASS")
+    mail_from: str = Field(default="", alias="MAIL_FROM")
+
+    def access_email_enabled(self) -> bool:
+        return bool(self.access_request_email_to.strip() and self.smtp_host.strip())
     # Student self-access: when on, a student (roster email) gets a session hard-bounded to
     # their OWN student_id — same tools, but every query is filtered to self, so one student
     # can never see another's data. Default OFF (students denied entirely) so this sensitive

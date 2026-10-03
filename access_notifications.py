@@ -5,6 +5,7 @@ delivery failure must never discard or roll back an already-filed request.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -42,6 +43,54 @@ def _signed_headers(body: bytes, *, timestamp: str, nonce: str) -> dict[str, str
 
 
 async def notify_access_request(*, role: str, campuses: list[str]) -> bool:
+    """Best-effort approver nudge when a self-service request is filed. Fans out to whichever
+    channels are configured — a signed webhook and/or an email to the approver — each carrying
+    role/campus ONLY (the requester identity stays in the admin-only DB queue). The queue is
+    authoritative; a notification failure never discards or rolls back the filed request."""
+    delivered = False
+    if settings.access_request_webhook_url.strip() and settings.access_request_webhook_secret.strip():
+        delivered = await _notify_webhook(role=role, campuses=campuses) or delivered
+    if settings.access_email_enabled():
+        delivered = await _notify_email(role=role, campuses=campuses) or delivered
+    return delivered
+
+
+async def _notify_email(*, role: str, campuses: list[str]) -> bool:
+    """Email the approver a PII-free 'a request is pending' nudge (role + campus only).
+    SMTP is blocking, so it runs in a worker thread; failures are swallowed (best-effort)."""
+    try:
+        await asyncio.to_thread(_send_smtp, role, campuses)
+        return True
+    except Exception as exc:  # noqa: BLE001 — queue already persisted; the email is a nudge
+        log.warning("access-request email failed: %s", type(exc).__name__)
+        return False
+
+
+def _send_smtp(role: str, campuses: list[str]) -> None:
+    import smtplib
+    import ssl
+    from email.message import EmailMessage
+
+    msg = EmailMessage()
+    msg["Subject"] = "Moodle MCP — a new access request is pending approval"
+    msg["From"] = settings.mail_from.strip() or settings.smtp_user.strip()
+    msg["To"] = settings.access_request_email_to.strip()
+    # No requester identity in the body — approvers open the admin-only queue for who/when.
+    msg.set_content(
+        "A new self-service access request is pending in the Moodle MCP.\n\n"
+        f"Requested role:    {role}\n"
+        f"Requested campus:  {', '.join(campuses) or '(none)'}\n\n"
+        "Review and approve it in the mcp_access_requests queue "
+        "(the requester's identity is recorded there, not in this email)."
+    )
+    with smtplib.SMTP(settings.smtp_host.strip(), settings.smtp_port, timeout=10) as smtp:
+        smtp.starttls(context=ssl.create_default_context())
+        if settings.smtp_user.strip():
+            smtp.login(settings.smtp_user.strip(), settings.smtp_pass)
+        smtp.send_message(msg)
+
+
+async def _notify_webhook(*, role: str, campuses: list[str]) -> bool:
     """Deliver a signed event with role/campus only; identity stays in the queue."""
     url = settings.access_request_webhook_url.strip()
     secret = settings.access_request_webhook_secret.strip()
