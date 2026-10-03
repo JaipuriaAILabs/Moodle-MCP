@@ -34,14 +34,14 @@ Follow `scripts/RECORDING_ENABLEMENT.md`; in short:
 
 ## 4. Scale & abuse limits
 - [ ] 🔴 **Set `MCP_REDIS_URL`** — the per-principal tool limiter *and* the new `create_report` cost cap only hold across instances with a shared store; without it, horizontal scaling breaks both.
-- [ ] 🟠 Raise `MCP_IP_RATE_LIMIT` for the trusted harness egress **or** enable `GATEWAY_ENFORCED` (single ingress) — if the harness egresses one shared IP, the per-IP cap is otherwise the ceiling for everyone.
+- [ ] 🟠 Do **not** raise `MCP_IP_RATE_LIMIT` to trust the jaipuria-os egress — it runs on Cloudflare Workers, so its outbound IP is a shared CF range, not a trustable single origin. Rely on the per-principal 90/min cap (keyed on the authenticated email); keep the per-IP cap as a flood guard only. See PRODUCTION_READINESS 0.4.
 - [ ] 🟢 Tune `MCP_CREATE_REPORT_LIMIT` (default 60/user/hour) if faculty legitimately generate larger batches.
 
 ## 5. Monitoring & alerting
 - [ ] 🟠 Set **`NEW_RELIC_LICENSE_KEY`** — the **EU Ingest-License** key for acct 8495484 (NOT a User/`NRAK-` or Insights key; must be the EU-region key, else the OTLP endpoint 401/403s and spans are silently dropped). One switch turns on **all three signals**: tool + `mcp.auth` **spans**, host/process + app **metrics** (`mcp.tool.calls`/`.duration`, `mcp.auth.calls`, CPU/mem/RSS), and (opt-in via `MCP_OTEL_LOGS=true`) **logs**. Traces + metrics default on; each toggles via `MCP_OTEL_TRACES/_METRICS/_LOGS`. Set `MCP_SERVICE_INSTANCE_ID` to the instance id once scaled.
 - [ ] 🟠 **Verify ingest** after setting the key: confirm service `jaipuria-moodle-mcp` appears in NR (EU), or grep Render logs for OTLP export errors — export failures are swallowed, so a wrong key/region shows as silence, not an error.
 - [ ] 🟠 Run `NEW_RELIC_USER_API_KEY=… ALERT_EMAIL=… bash monitoring/newrelic_uptime_alert.sh` (uptime monitor + policy), then add the span + metric NRQL conditions from `monitoring/README.md`.
-- [ ] 🟢 W3C `traceparent` is honoured for end-to-end traces — once the **client harness** is OTel-instrumented, harness→MCP stitches into one distributed trace (no MCP change needed).
+- [ ] 🟢 W3C `traceparent` is honoured for end-to-end traces — if jaipuria-os forwards a `traceparent` on its MCP calls, OS→MCP stitches into one distributed trace (no MCP change needed). jaipuria-os uses Cloudflare Workers Observability, not OTel/NR, so this is a nice-to-have, not expected.
 
 ## 6. Report generation at scale
 - [ ] 🟠 Confirm `AGENT_REPORT_QUEUE=true` + `AGENT_SHARED_SECRET` (≥32 chars) so generation is queued, not synchronous, under load.
@@ -52,12 +52,12 @@ Follow `scripts/RECORDING_ENABLEMENT.md`; in short:
 - [ ] 🟠 **Lock the `mcp_audit` schema** to admins only; keep raw PII out of New Relic.
 - [ ] 🟢 Shorten `REPORT_LINK_TTL_DAYS` from 90 → 7–30 days for student-PII links.
 
-## 8. Client-harness side (Rajika)
-- [ ] 🟠 In whichever client harness is adopted, stamp each MCP call with a per-turn `X-Request-Id` header so prompts join to tool-call audit rows (`mcp_audit.tool_calls.request_id`).
-- [ ] 🟢 Decide `jaipuriaschools.ac.in` handling (the harness may admit it as USER; MCP denies — confirm the graceful-denial UX is acceptable).
+## 8. jaipuria-os side (Rajika)
+- [ ] 🟠 Prompt correlation is a **jaipuria-os kernel feature**, not config: the shared MCP client (`packages/mcp-shared/src/client.ts` `#headers()`) sends no `X-Request-Id`, and the per-turn/prompt id lives in the agent loop (`workshop-backend` overseer). To join prompts to `mcp_audit.tool_calls.request_id`, the client must stamp a per-call `X-Request-Id` plumbed down from the agent turn. Affects every connector + crosses the agent→gatekeeper RPC boundary → small, reviewed kernel change (mind the "never log headers/prompts" rule). The MCP already reads `x-request-id`; no MCP change needed.
+- [ ] 🟢 Decide `jaipuriaschools.ac.in` handling (jaipuria-os may admit it as USER; MCP denies — confirm the graceful-denial UX is acceptable).
 
 ## 9. Verify & ramp
-- [ ] Re-add the Moodle MCP connector in Claude.ai / the client harness (a deploy drops the session); `whoami` returns `campuses: all`.
+- [ ] Re-add the Moodle MCP connector in Claude.ai / jaipuria-os (a deploy drops the session); `whoami` returns `campuses: all`.
 - [ ] Smoke: health 200, `/mcp` 401, a `get_student` by name, one `create_report`, then `v_activity` shows the rows.
 - [ ] Ramp the cohort **150 → 500 → 5,000** with New Relic + audit dashboards watched; load-test the target concurrency first.
 

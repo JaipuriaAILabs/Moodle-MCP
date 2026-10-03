@@ -1,7 +1,9 @@
 # Monitoring & alerting — Moodle MCP
 
-New Relic **EU**, account **8495484** (the MCP-platform observability account; distinct
-from the harness's NR account 8379209). NerdGraph endpoint: `https://api.eu.newrelic.com/graphql`.
+New Relic **EU**, account **8495484** (the MCP's own observability account). NerdGraph
+endpoint: `https://api.eu.newrelic.com/graphql`. (jaipuria-os has its own, separate
+observability — Cloudflare Workers Observability — so there is no cross-account NR join to
+maintain here.)
 
 ## Available now (no MCP change): external uptime
 `newrelic_uptime_alert.sh` provisions, via NerdGraph:

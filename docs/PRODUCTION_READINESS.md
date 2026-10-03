@@ -1,7 +1,7 @@
-# Moodle MCP — production readiness plan (5,000 Jaipuria users via a client harness)
+# Moodle MCP — production readiness plan (5,000 Jaipuria users via jaipuria-os)
 
 Scope: take the Moodle MCP from "works for a demo / a few faculty" to "safe and
-reliable for ~5,000 students + professors through a client harness." Grouped by priority with
+reliable for ~5,000 students + professors through jaipuria-os." Grouped by priority with
 owner and rough effort. **P0 = launch blocker.** Synthesised from the Sept 2026
 hardening + client-integration + activity-recording work.
 
@@ -10,7 +10,7 @@ hardening + client-integration + activity-recording work.
 > production configuration or institutional approval.
 
 Legend — owner: **ops** (Render/Supabase/env, not doable from code), **eng** (this
-repo), **rajika** (client-harness repo), **decision** (data owner).
+repo), **rajika** (jaipuria-os repo), **decision** (data owner).
 
 ---
 
@@ -34,13 +34,18 @@ so **nothing is recorded today**. → Follow `scripts/RECORDING_ENABLEMENT.md`: 
 `sql/2026-09-18_mcp_audit_backend.sql`, mint the `mcp_audit_writer` JWT, set the audit +
 capture env. *(ops/eng · ½ day)*
 
-**0.4 Fix rate limiting for the harness topology.** If harness MCP traffic egresses **one
-Railway IP**, so the per-IP cap (`MCP_IP_RATE_LIMIT` = 1200/min ≈ 20 rps) becomes the
-ceiling for *all* users and will throttle the cohort. And with >1 instance the
-in-process limiter diverges. → Set `MCP_REDIS_URL` for shared limiting, and either raise
-the per-IP cap substantially for the trusted harness origin **or** cut traffic over to the
-governed gateway (`GATEWAY_ENFORCED`, single trusted ingress). Per-principal 90/min
-still bounds each user. *(ops + eng · 1 day)*
+**0.4 Fix rate limiting for the jaipuria-os topology.** jaipuria-os runs on **Cloudflare
+Workers**, so its outbound MCP `fetch` egresses from **Cloudflare's shared IP ranges** — not
+one stable, trustable IP. You therefore **cannot** allowlist or raise the per-IP cap for
+"the harness origin" (it is shared with the whole internet), and unless the OS forwards the
+real end-user IP in `X-Forwarded-For`, every OS user collapses onto a handful of CF egress
+IPs → the per-IP cap (`MCP_IP_RATE_LIMIT` = 1200/min) becomes a shared ceiling. → The real
+control is the **per-principal** limit (90/min, keyed on the authenticated email), which
+already bounds each user regardless of egress IP; keep `MCP_IP_RATE_LIMIT` purely as a flood
+guard, do **not** raise it to trust an egress. For horizontal scale set `MCP_REDIS_URL` so
+the per-principal limiter + `create_report` cost cap hold across instances (the in-process
+limiter diverges with >1 instance). Direct Claude.ai connectors still benefit from the
+campus-NAT headroom already configured. *(ops + eng · ½ day)*
 
 **0.4a `create_report` cost cap (done 2026-09-21).** Per-principal budget on the one
 money-spending tool (`_enforce_report_budget`, default 60/user/hour via
@@ -84,10 +89,10 @@ alerts. The `mcp_audit` ledger + `v_activity` view remain the detailed activity 
 **1.3 CI gate (done).** GitHub Actions runs the repository tests on PRs/pushes and now includes
 `pip-audit` plus Bandit; Dependabot covers Python and Actions dependencies. *(eng shipped)*
 
-**1.4 Prompt correlation.** Stamp each MCP call with a per-turn `X-Request-Id` header from the client harness so activity joins to the prompt that caused it.
+**1.4 Prompt correlation (jaipuria-os kernel, Rajika).** The MCP already reads `x-request-id`; the join needs jaipuria-os to stamp a per-turn `X-Request-Id` on its MCP calls. This is a kernel change in `packages/mcp-shared/src/client.ts` + the agent loop (not config) — see OPS_HANDOFF §8.
 *(rajika · 1 h)*
 
-**1.5 `jaipuriaschools.ac.in` handling.** The harness may admit that domain as USER, but the MCP
+**1.5 `jaipuriaschools.ac.in` handling.** jaipuria-os may admit that domain as USER, but the MCP
 denies it (not a subdomain of `jaipuria.ac.in`). Confirm that's intended (schools staff
 have no MBA data) and that the denial is a clean, explained message, not an error.
 *(decision · 15 min)*
@@ -126,7 +131,7 @@ service actually reconnects OAuth sessions across deploys now that keys are pinn
 6. [ ] Report queue + worker; moodle-agent off free plan (1.1)
 7. [ ] New Relic health/error/latency alerts live (1.2)
 8. [x] CI running tests plus dependency/static security scans on PRs (1.3)
-9. [ ] Client-harness `X-Request-Id` header deployed; join verified (1.4)
+9. [ ] jaipuria-os `X-Request-Id` header deployed; join verified (1.4)
 10. [ ] Cohort ramp 150 → 500 → 5,000 with monitoring (2.5)
 
 ## Status snapshot (2026-09-18)
