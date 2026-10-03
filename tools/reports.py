@@ -122,6 +122,7 @@ def _onepager_fetch(svc, p: ReportParams):
     q = (svc.client.table("onepager_narratives")
          .select("trimester,narrative,created_at")
          .eq("run_id", run_id).eq("student_id", sid))
+    q = svc.apply_student(q)
     if p.trimester:
         q = q.eq("trimester", str(p.trimester))
     rows = q.limit(20).execute().data or []
@@ -158,14 +159,17 @@ def _availability_impl(svc, p: AvailabilityParams) -> dict:
     snapshot time, roster size, and the trimesters covered by that snapshot."""
     if p.campus and svc.campus_scope(p.campus) == []:
         return not_found("scope")
+    self_batch = getattr(svc, "self_batch", None)
+    if self_batch is not None and p.batch is not None and p.batch != self_batch:
+        return not_found("scope")
     q = (svc.client.table("extraction_runs")
          .select("campus,batch,run_id,finished_at")
          .eq("status", "completed").eq("purpose", settings.report_purpose)
          .not_.is_("finished_at", "null")
          .order("finished_at", desc=True).limit(200))
     q = svc.apply_campus(q, requested=p.campus)
-    if p.batch:
-        q = q.eq("batch", p.batch)
+    if p.batch or self_batch:
+        q = q.eq("batch", p.batch or self_batch)
     runs = q.execute().data or []
     latest, order = {}, []
     for r in runs:  # newest-first: first hit per scope is the live snapshot
@@ -176,9 +180,9 @@ def _availability_impl(svc, p: AvailabilityParams) -> dict:
     scopes = []
     for k in order[:12]:
         r = latest[k]
-        n = (svc.client.table("students").select("student_id", count="exact")
-             .eq("campus", r["campus"]).eq("batch", r["batch"])
-             .limit(1).execute()).count or 0
+        roster_q = (svc.client.table("students").select("student_id", count="exact")
+                    .eq("campus", r["campus"]).eq("batch", r["batch"]))
+        n = (svc.apply_student(roster_q).limit(1).execute()).count or 0
         from tools.common import courses_for
         tris = sorted({c["trimester"] for c in courses_for(svc, r["run_id"]).values()
                        if c["trimester"]}, key=str)

@@ -30,7 +30,10 @@ def _roster_impl(svc, p: RosterParams) -> dict:
     q = (svc.client.table("students")
          .select("student_id,student_name,campus,batch,section_group")
          .eq("campus", p.campus).eq("batch", p.batch))
-    rows = (q.limit(100000).execute()).data or []
+    # A student session shares this tool surface with educators, so the row-owner
+    # boundary must be applied even to roster queries. Without this filter a student
+    # could list every name and enrolment id in their campus/batch.
+    rows = (svc.apply_student(q).limit(100000).execute()).data or []
     seen, uniq = set(), []
     for r in rows:  # students table is per-run; dedupe by id
         if r["student_id"] in seen:

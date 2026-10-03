@@ -1,12 +1,13 @@
-"""DB-backed grants for non-Jaipuria OAuth accounts (table: mcp_faculty).
+"""DB-backed educator grants and student-roster classification.
 
-Verified Jaipuria accounts now receive all-campus access directly in
-security.principal_from_claims. This registry remains for explicitly granted
-external accounts, with the MCP_FACULTY env var as a break-glass override.
+In ENFORCE mode, ``mcp_faculty`` is the authoritative educator allowlist for every
+domain. OFF/SHADOW retain the historical all-campus Jaipuria policy, except that a
+roster student is always self-scoped (when enabled) or denied. ``MCP_FACULTY`` is the
+break-glass override.
 
 Threat model notes:
-* Jaipuria accounts, including students, do not consult this registry. The
-  student-roster deny only applies to external accounts using explicit grants.
+* An explicit educator grant is checked before student classification, so an admin-
+  approved dual-role student/TA receives the educator grant.
 * Everything fails CLOSED: a DB error, a malformed row, an inactive row, or an
   unparseable campuses value all resolve to "no access" (with a stale-cache
   grace for transient DB blips, so a 2-second Supabase hiccup doesn't kick out
@@ -71,7 +72,7 @@ def _fetch_student_identity(email: str):
 
 
 def student_identity(email: str):
-    """For a student email -> {'student_id','campus'} (the self-scope key), else None.
+    """For a student email -> {'student_id','campus','batch'} self-scope, else None.
     Fail-closed on error (None) WITH last-known-good grace, so a roster-DB blip neither
     invents access nor needlessly drops a known student mid-session."""
     email = (email or "").strip().lower()
@@ -91,7 +92,9 @@ def student_identity(email: str):
     if not row or not row.get("student_id"):
         _student_ids.set(email, _ID_MISS)
         return None
-    ident = {"student_id": row["student_id"], "campus": (row.get("campus") or "").strip().lower()}
+    ident = {"student_id": row["student_id"],
+             "campus": (row.get("campus") or "").strip().lower(),
+             "batch": (row.get("batch") or "").strip()}
     _student_ids.set(email, ident)
     _stale_student_ids.set(email, ident)
     return dict(ident)
@@ -207,10 +210,13 @@ def list_pending_requests(limit: int = 200):
 
 
 def is_student(email: str) -> bool:
-    """True when the email appears in the student roster — those accounts are
-    hard-denied regardless of any mcp_faculty row. On a DB error this returns
-    True (deny): the env MCP_FACULTY override path never consults this, so the
-    administrator always retains break-glass access."""
+    """True when the email appears in the student roster.
+
+    The caller decides whether that means a self-scoped student session or denial;
+    an explicit educator grant is checked first. On a DB error this returns True so
+    an unknown identity can never fall through to a broader default grant. The env
+    ``MCP_FACULTY`` override is resolved before this check for break-glass access.
+    """
     email = (email or "").strip().lower()
     if not email:
         return True
@@ -234,5 +240,5 @@ def is_student(email: str) -> bool:
     _students.set(email, found)
     _stale_students.set(email, found)
     if found:
-        log.warning("access denied: subject=%s is in the student roster", _subject(email))
+        log.info("student roster match: subject=%s", _subject(email))
     return found

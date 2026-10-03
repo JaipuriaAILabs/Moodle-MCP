@@ -197,9 +197,9 @@ scope it once RBAC is stable in production.
 
 ## 8. Audit & observability
 
-- Record `role` + resolved `campus_scope` (+ `rbac_would_deny` in shadow) on every call — extends the
+- [x] Record `role` + resolved `campus_scope` (+ bounded shadow outcome) on every call — extends the
   existing `mcp_audit.tool_calls` and the New Relic `mcp.campus_scope` dimension (see
-  `docs/NR_ALERTS.md`). Add a NR view/alert on `rbac_would_deny` volume during shadow.
+  `docs/NR_ALERTS.md`). The shadow would-deny NRQL alert is documented there.
 - Audit every `mcp_faculty` change (§4c) — grant changes are security events.
 
 ## 9. DPDP alignment
@@ -236,7 +236,8 @@ campus-scoped" when P3 lands. Complements the PII pseudonymization plan (AIA-138
 
 ## Appendix — immediate hardening items (independent of RBAC)
 
-- [ ] **Revoke `anon`/`authenticated` grants on `mcp_faculty`** (§4b) — latent, do now.
+- [x] **Revoke `anon`/`authenticated` grants on `mcp_faculty`** (§4b) — shipped in
+      `sql/2026-09-30_rbac_phase0.sql`; still verify the migration is applied in each environment.
 - [ ] Carry over from `RENDER_GO_LIVE.md`: CF bot/WAF skip (AIA-1391, Rajika), privacy notice publish
       (AIA-1392, Shiva), NR alerts (`docs/NR_ALERTS.md`).
 - [x] Already done: audit `mcp_audit` RLS lockdown; `report_accuracy` RLS + purge-RPC fix (advisor

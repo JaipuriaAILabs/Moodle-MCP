@@ -18,8 +18,9 @@ any faculty member adding the server):
    actually protects the code is fully retained. Codes without PKCE keep the
    strict client check.
 
-Pinned to fastmcp==2.14.7 (requirements.txt): the tolerant override mirrors that
-version's storage internals.
+Pinned to fastmcp==3.4.5 (requirements.txt): the tolerant override touches only the
+authorization-code store and is covered by cross-client/PKCE tests. FastMCP's built-in
+authorization consent remains explicitly enabled to preserve the v3 confused-deputy fix.
 """
 import ipaddress
 import json

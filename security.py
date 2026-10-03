@@ -110,11 +110,15 @@ def _student_principal(claims: dict, email: str):
         return None
     import faculty as registry
     ident = registry.student_identity(email)
-    if not ident or not ident.get("student_id"):
+    # All three keys are required.  A partial principal would still self-filter
+    # student-bearing rows, but a missing campus/batch could expose unowned scope
+    # metadata (runs, course names, trimester availability).  Fail closed instead.
+    if not ident or not all(ident.get(key) for key in ("student_id", "campus", "batch")):
         return None
     return {"name": claims.get("name") or email, "email": email,
-            "campuses": [ident["campus"]] if ident.get("campus") else [],
-            "role": "student", "student_id": ident["student_id"], "can_generate": True}
+            "campuses": [ident["campus"]],
+            "role": "student", "student_id": ident["student_id"],
+            "batch": ident["batch"], "can_generate": True}
 
 
 def _pending_principal(claims: dict, email: str) -> dict:
@@ -128,7 +132,7 @@ def _pending_principal(claims: dict, email: str) -> dict:
 def _registry_principal(claims: dict, email: str, domain: str, *, quiet: bool = False,
                         pending_ok: bool = False):
     """The authoritative RBAC resolution for ANY account (Jaipuria included): the env
-    override, student-roster deny, mcp_faculty grant, domain gate, and configured
+    override, mcp_faculty grant, student classification, domain gate, and configured
     default — in that order. Returns a principal dict carrying role + can_generate, or
     None (deny). This is what ENFORCE mode returns, and what SHADOW mode logs. Kept
     separate so the historical all-access path (OFF/SHADOW for Jaipuria) is untouched.
@@ -180,34 +184,54 @@ def _registry_principal(claims: dict, email: str, domain: str, *, quiet: bool = 
             "role": _role_for(default), "can_generate": True}
 
 
-def _log_shadow(claims: dict, email: str, domain: str) -> None:
+def _shadow_decision(principal) -> dict:
+    """Bounded, non-PII representation of the decision ENFORCE would make."""
+    if principal is None:
+        return {"outcome": "deny", "role": "none", "campus_scope": "none",
+                "can_generate": False}
+    role = str(principal.get("role") or _role_for(principal.get("campuses")))
+    campuses = principal.get("campuses")
+    scope = "all" if campuses is None else sorted(
+        {str(c).strip().lower() for c in campuses if str(c).strip()})
+    outcome = "pending" if role == "pending" else "allow"
+    return {"outcome": outcome, "role": role[:32], "campus_scope": scope,
+            "can_generate": bool(principal.get("can_generate", outcome == "allow"))}
+
+
+def _log_shadow(claims: dict, email: str, domain: str) -> dict:
     """SHADOW mode: compute what ENFORCE *would* do for this Jaipuria caller and log it,
     without changing the served (all-access) principal. Never raises — a shadow-logging
-    failure must not affect a real sign-in."""
+    failure must not affect a real sign-in. Returns a bounded decision so each subsequent
+    tool audit record carries the shadow outcome without raw identity."""
     try:
         from config import settings
         subject = hashlib.sha256(email.encode()).hexdigest()[:12]
         would = _registry_principal(claims, email, domain, quiet=True,
                                     pending_ok=settings.self_service_access)
-        if would is None:
+        decision = _shadow_decision(would)
+        if decision["outcome"] == "deny":
             log.info("rbac.shadow subject=%s would=DENY (no grant; self-service off)", subject)
-        elif would.get("role") == "pending":
+        elif decision["outcome"] == "pending":
             log.info("rbac.shadow subject=%s would=PENDING (no grant; may self-request access)", subject)
         else:
-            camp = would.get("campuses")
             log.info("rbac.shadow subject=%s would=ALLOW role=%s campuses=%s can_generate=%s",
-                     subject, would.get("role"),
-                     "all" if camp is None else ",".join(camp), would.get("can_generate"))
+                     subject, decision["role"],
+                     decision["campus_scope"] if isinstance(decision["campus_scope"], str)
+                     else ",".join(decision["campus_scope"]), decision["can_generate"])
+        return decision
     except Exception:  # noqa: BLE001 — shadow observation must never break auth
         log.warning("rbac.shadow computation failed", exc_info=True)
+        return {"outcome": "error", "role": "unknown", "campus_scope": "none",
+                "can_generate": False}
 
 
 def principal_from_claims(claims: dict):
     """Resolve a verified Google identity to a principal (or None = deny), governed by
     MCP_RBAC_MODE. OFF (default): verified Jaipuria accounts get all-campus access, the
     historical policy. SHADOW: same served access, but the would-be enforced grant is
-    logged. ENFORCE: the mcp_faculty registry is authoritative (role + campus scope;
-    unlisted/inactive/student Jaipuria accounts denied). Non-Jaipuria accounts always
+    logged. ENFORCE: the mcp_faculty registry is authoritative for educators (role + campus
+    scope); students are self-scoped when enabled and denied otherwise; unlisted accounts
+    become pending or are denied. Non-Jaipuria accounts always
     follow the registry ladder, in every mode (they were never all-access)."""
     from config import settings
     email = str(claims.get("email") or "").strip().lower()
@@ -220,6 +244,17 @@ def principal_from_claims(claims: dict):
     # or userinfo v2 payload, so require True instead of treating None as success.
     if verified is not True:
         return None
+    # Defense-in-depth (confused-deputy / token substitution): when the upstream Google tokeninfo
+    # audience is present in the claims it MUST be our OAuth client — a token minted for a different
+    # Google app (even with the same scopes) is never honored. Absent audience can't be asserted and
+    # is allowed: the OAuthProxy flow already binds the audience by doing the code exchange with our
+    # own credentials, so a legitimate token always carries our client id (or none here).
+    expected_aud = settings.google_oauth_client_id
+    token_aud = (claims.get("google_token_info") or {}).get("audience")
+    if expected_aud and token_aud and token_aud != expected_aud:
+        subject = hashlib.sha256(email.encode()).hexdigest()[:12]
+        log.warning("oauth token audience mismatch (subject=%s) — rejecting", subject)
+        return None
     domain = email.rsplit("@", 1)[1]
     is_jaipuria = domain == "jaipuria.ac.in" or domain.endswith(".jaipuria.ac.in")
 
@@ -230,22 +265,27 @@ def principal_from_claims(claims: dict):
                                        pending_ok=settings.self_service_access)
         # OFF / SHADOW: historical all-campus grant — but a STUDENT roster email must NEVER
         # receive it: the cohort-wide grant would let one student read every other student's
-        # data. This holds in every mode (enforce denies students via the registry ladder).
-        # An educator explicitly listed in the MCP_FACULTY env override is exempt (covers a
-        # dual-role TA) and does not trigger the roster lookup.
+        # data. An explicit educator grant (env or DB) still wins for a genuine dual-role TA,
+        # matching ENFORCE's documented classification precedence. We only pay the extra registry
+        # lookup after a roster hit, so the historical non-student OFF path remains DB-free.
         import faculty as registry
         if email not in settings.faculty() and registry.is_student(email):
-            # A student NEVER gets the cohort-wide grant. With student self-access on they get a
-            # session hard-bounded to their own student_id (same tools, self only); otherwise deny.
-            sp = _student_principal(claims, email)
-            subject = hashlib.sha256(email.encode()).hexdigest()[:12]
-            if sp is None:
-                log.warning("student roster email denied (subject=%s, mode=%s)", subject, mode)
-            return sp
+            if registry.faculty_grant(email) is None:
+                # A student NEVER gets the cohort-wide grant. With student self-access on they get
+                # a session hard-bounded to their own student_id; otherwise deny.
+                sp = _student_principal(claims, email)
+                subject = hashlib.sha256(email.encode()).hexdigest()[:12]
+                if sp is None:
+                    log.warning("student roster email denied (subject=%s, mode=%s)", subject, mode)
+                elif mode == "shadow":
+                    sp["_rbac_shadow"] = _shadow_decision(sp)
+                return sp
         # OFF / SHADOW: preserve the historical all-campus grant for non-student accounts.
+        principal = {"name": claims.get("name") or email, "email": email,
+                     "campuses": None, "role": "cross_campus", "can_generate": True}
         if mode == "shadow":
-            _log_shadow(claims, email, domain)
-        return {"name": claims.get("name") or email, "email": email, "campuses": None}
+            principal["_rbac_shadow"] = _log_shadow(claims, email, domain)
+        return principal
 
     # Non-Jaipuria accounts: always the registry ladder (unchanged in every mode — they
     # were never covered by the all-access policy).
@@ -553,13 +593,31 @@ def _start_tool_span(name: str, headers=None):
         return None
 
 
-def _end_tool_span(span, outcome: str, error_code, scope, duration_s=None, tool="?") -> None:
+def _authorization_attributes(principal) -> dict:
+    """Low-cardinality, non-PII RBAC dimensions for traces and metrics."""
+    if not isinstance(principal, dict):
+        return {"mcp.role": "anonymous", "mcp.rbac_shadow_outcome": "not_applicable"}
+    role = str(principal.get("role") or _role_for(principal.get("campuses"))).lower()
+    allowed_roles = {"admin", "cross_campus", "campus_admin", "faculty", "viewer",
+                     "student", "pending"}
+    shadow = principal.get("_rbac_shadow")
+    shadow_outcome = (str(shadow.get("outcome")).lower()
+                      if isinstance(shadow, dict) and shadow.get("outcome") else "not_applicable")
+    if shadow_outcome not in {"allow", "deny", "pending", "error", "not_applicable"}:
+        shadow_outcome = "error"
+    return {"mcp.role": role if role in allowed_roles else "other",
+            "mcp.rbac_shadow_outcome": shadow_outcome}
+
+
+def _end_tool_span(span, outcome: str, error_code, scope, duration_s=None, tool="?",
+                   principal=None) -> None:
     # Emit the aggregated tool metric regardless of whether a span exists — metrics are
     # a separate signal (host/process gauges + counters) that must not be gated on the
     # tracer, and aren't subject to trace sampling.
     try:
         import telemetry
-        telemetry.record_tool_metric(tool, outcome, error_code, scope, duration_s)
+        telemetry.record_tool_metric(tool, outcome, error_code, scope, duration_s,
+                                     _authorization_attributes(principal))
     except Exception:  # noqa: BLE001
         pass
     if span is None:
@@ -570,6 +628,8 @@ def _end_tool_span(span, outcome: str, error_code, scope, duration_s=None, tool=
             span.set_attribute("mcp.error_code", error_code)
         if scope:
             span.set_attribute("mcp.campus_scope", scope)
+        for key, value in _authorization_attributes(principal).items():
+            span.set_attribute(key, value)
         if outcome == "failure":
             span.set_status(_StatusCode.ERROR, error_code or "error")
     except Exception:  # noqa: BLE001
@@ -582,10 +642,10 @@ def _end_tool_span(span, outcome: str, error_code, scope, duration_s=None, tool=
 
 
 def build_middleware(rate_limit: int, window: float):
-    from fastmcp.exceptions import ToolError
+    from fastmcp.exceptions import ToolError, ValidationError as FastMCPValidationError
     from fastmcp.server.dependencies import get_http_headers
     from fastmcp.server.middleware import Middleware
-    from pydantic import ValidationError
+    from pydantic import ValidationError as PydanticValidationError
 
     from config import settings
     limiter = SharedRateLimiter(rate_limit, window, maxkeys=settings.rate_limit_max_keys,
@@ -615,13 +675,26 @@ def build_middleware(rate_limit: int, window: float):
         except Exception:  # noqa: BLE001
             return None
 
-    def _scope(context):
+    def _scope(context, principal):
+        """Resolved effective campus scope, not merely the caller's requested value."""
         try:
             args = _args(context) or {}
             p = args.get("params") if isinstance(args, dict) else None
-            return (p or {}).get("campus") if isinstance(p, dict) else None
+            requested = (p or {}).get("campus") if isinstance(p, dict) else None
+            requested = str(requested).strip().lower() if requested else None
+            if not isinstance(principal, dict):
+                return "none"
+            allowed = principal.get("campuses")
+            if allowed is None:
+                return requested or "all"
+            allowed = sorted({str(c).strip().lower() for c in allowed if str(c).strip()})
+            if not allowed:
+                return "none"
+            if requested:
+                return requested if requested in allowed else "none"
+            return ",".join(allowed)
         except Exception:  # noqa: BLE001
-            return None
+            return "none"
 
     def _source_ip(headers):
         # LAST (rightmost) hop of X-Forwarded-For — the trusted-proxy-appended value;
@@ -670,7 +743,7 @@ def build_middleware(rate_limit: int, window: float):
                 if settings.require_audit:
                     recorded = await record_tool_call(
                         tool=name, principal=principal, ok=None, started=started,
-                        headers=headers, scope=_scope(context), **cap)
+                        headers=headers, scope=_scope(context, principal), **cap)
                     if not recorded:
                         err = "audit_unavailable"
                         raise ToolError(MSG_AUDIT)
@@ -678,7 +751,7 @@ def build_middleware(rate_limit: int, window: float):
                 if not ok:
                     await record_tool_call(tool=name, principal=principal, ok=False,
                                            started=started, headers=headers,
-                                           scope=_scope(context), error_code="rate_limited", **cap)
+                                           scope=_scope(context, principal), error_code="rate_limited", **cap)
                     err = "rate_limited"
                     raise ToolError(MSG_RATE)
                 try:
@@ -690,43 +763,48 @@ def build_middleware(rate_limit: int, window: float):
                     try:
                         await record_tool_call(tool=name, principal=principal, ok=True,
                                                started=started, headers=headers,
-                                               scope=_scope(context), result=result, **cap)
+                                               scope=_scope(context, principal), result=result, **cap)
                     except Exception:  # noqa: BLE001 — success audit must never fail the call
                         log.warning("post-success audit for %s failed", name, exc_info=True)
                     return result
                 except ToolError:
                     await record_tool_call(tool=name, principal=principal, ok=False,
                                            started=started, headers=headers,
-                                           scope=_scope(context), error_code="tool_error", **cap)
+                                           scope=_scope(context, principal), error_code="tool_error", **cap)
                     err = "tool_error"
                     raise  # already a clean, caller-safe message
-                except ValidationError as e:
+                except (PydanticValidationError, FastMCPValidationError) as e:
                     # Caller sent bad/missing parameters. Tell them WHICH — this is
                     # their own input, not an internal detail — so an agent can fix
                     # the call instead of uselessly retrying a "server error".
-                    first = (e.errors() or [{}])[0]
+                    # FastMCP 3 wraps Pydantic's error in its own ValidationError;
+                    # FastMCP 2 passed the Pydantic exception through directly.
+                    detail = e.__cause__ if isinstance(e.__cause__, PydanticValidationError) else e
+                    errors = detail.errors() if isinstance(detail, PydanticValidationError) else []
+                    first = (errors or [{}])[0]
                     loc = ".".join(str(x) for x in first.get("loc", ())) or "params"
                     await record_tool_call(tool=name, principal=principal, ok=False,
                                            started=started, headers=headers,
-                                           scope=_scope(context), error_code="bad_params", **cap)
+                                           scope=_scope(context, principal), error_code="bad_params", **cap)
                     err = "bad_params"
                     raise ToolError(f"Invalid parameters — {loc}: "
-                                    f"{first.get('msg', 'validation failed')}")
+                                    f"{first.get('msg') or str(e).splitlines()[0] or 'validation failed'}")
                 except PermissionError:
                     await record_tool_call(tool=name, principal=principal, ok=False,
                                            started=started, headers=headers,
-                                           scope=_scope(context), error_code="unauthorized", **cap)
+                                           scope=_scope(context, principal), error_code="unauthorized", **cap)
                     err = "unauthorized"
                     raise ToolError(MSG_DENIED)
                 except Exception:  # noqa: BLE001 - the point is to never leak internals
                     log.exception("tool %s failed", name)
                     await record_tool_call(tool=name, principal=principal, ok=False,
                                            started=started, headers=headers,
-                                           scope=_scope(context), error_code="internal_error", **cap)
+                                           scope=_scope(context, principal), error_code="internal_error", **cap)
                     err = "internal_error"
                     raise ToolError(MSG_ERROR)
             finally:
-                _end_tool_span(span, outcome, err, _scope(context),
-                               duration_s=time.monotonic() - started, tool=name)
+                _end_tool_span(span, outcome, err, _scope(context, principal),
+                               duration_s=time.monotonic() - started, tool=name,
+                               principal=principal)
 
     return GuardMiddleware()

@@ -48,6 +48,10 @@ def register(mcp, get_service):
                     "note": f"Role must be one of: {', '.join(_SELF_SERVICE_ROLES)} "
                             "(admin/cross-campus are assigned by an administrator)."}
         if registry.submit_access_request(email, svc.principal.get("name"), role, [campus]):
+            # The DB queue is already durable and remains authoritative. Notification
+            # is best-effort and contains no requester identity or derived identifier.
+            from access_notifications import notify_access_request
+            await notify_access_request(role=role, campuses=[campus])
             return {"ok": True, "status": "pending",
                     "requested": {"campus": campus, "role": role},
                     "note": "Request submitted — an administrator will review it. Once approved, "

@@ -147,6 +147,9 @@ class SvcC:
     def latest_run(self, campus, batch):
         return "run1"
 
+    def apply_student(self, q, col="student_id"):
+        return q
+
 
 _op_seen = []
 reports._onepager_fetch(SvcC(_op_seen), P(RAW))
@@ -177,6 +180,9 @@ class SvcRow:
 
     def latest_run(self, campus, batch):
         return "run1"
+
+    def apply_student(self, q, col="student_id"):
+        return q
 
 
 _ret = reports._onepager_fetch(SvcRow(), P(RAW))

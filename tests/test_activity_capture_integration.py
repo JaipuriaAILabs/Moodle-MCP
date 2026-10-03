@@ -86,7 +86,8 @@ _set(supabase_audit_key="audit-writer-key", audit_hmac_key="hmac-secret-for-subj
 settings.supabase_url = "https://example.supabase.co"
 settings.supabase_anon_key = ""
 
-PRIN = {"email": "faculty@jaipuria.ac.in", "name": "A Faculty", "campuses": None}
+PRIN = {"email": "faculty@jaipuria.ac.in", "name": "A Faculty", "campuses": None,
+        "role": "cross_campus", "can_generate": True}
 HDRS = {"user-agent": "JChat/1.0", "mcp-session-id": "sess-abc", "x-request-id": "req-1"}
 ARGS = {"params": {"student_id": "Aashna Gupta", "campus": "Jaipur"}}
 
@@ -113,7 +114,11 @@ asyncio.run(audit_store.record_tool_call(
     tool="create_report", principal=PRIN, ok=True, started=time.monotonic(),
     headers=HDRS, scope="Jaipur", arguments=ARGS, result=r_struct, source_ip="10.0.0.9"))
 p = CAPTURED["payload"]
-check("flags off -> metadata is only server_version", set(p["p_metadata"]) == {"server_version"})
+check("flags off -> metadata keeps only version + non-PII authorization",
+      set(p["p_metadata"]) == {"server_version", "authorization"})
+check("flags off -> authorization role/scope retained",
+      p["p_metadata"]["authorization"]["role"] == "cross_campus"
+      and p["p_metadata"]["authorization"]["campus_scope"] == "all")
 check("flags off -> user still pseudonymised", len(p["p_user_subject"]) == 64)
 check("flags off -> raw email absent from payload", "faculty@jaipuria.ac.in" not in json.dumps(p))
 
@@ -159,6 +164,7 @@ succ = [c for c in CALLS if c.get("ok") is True]
 check("middleware recorded exactly one success", len(succ) == 1)
 check("middleware forwarded arguments", succ[0]["arguments"]["params"]["student_id"] == "Aashna Gupta")
 check("middleware forwarded the ToolResult object", isinstance(succ[0].get("result"), ToolResult))
+check("middleware records resolved campus scope", succ[0].get("scope") == "jaipur")
 # X-Forwarded-For "9.9.9.9, 10.0.0.1": the LAST hop (10.0.0.1) is the trusted
 # proxy-appended value; the leftmost (9.9.9.9) is client-supplied/spoofable.
 check("middleware forwards the TRUSTED (rightmost) X-Forwarded-For hop",

@@ -78,6 +78,12 @@ ps = principal_from_claims(claims("kid@jaipuria.ac.in"))
 check("off: STUDENT never gets all-access — self-bounded instead",
       ps is not None and ps["role"] == "student" and ps["campuses"] != None
       and ps["student_id"] == "ID_kid")
+reset(rows={"ta@jaipuria.ac.in": {"name": "TA", "campuses": ["noida"], "active": True,
+                                  "role": "faculty"}},
+      students={"ta@jaipuria.ac.in"})
+dp = principal_from_claims(claims("ta@jaipuria.ac.in"))
+check("off: explicit educator grant wins for a dual-role student/TA",
+      dp is not None and dp["campuses"] is None and dp.get("role") != "student")
 
 print("MODE shadow — served access unchanged, but registry IS evaluated (for logging)")
 set_mode("shadow")
@@ -85,10 +91,23 @@ calls = reset(rows={"prof@jaipuria.ac.in": {"name": "Prof", "campuses": ["noida"
 p = principal_from_claims(claims("prof@jaipuria.ac.in"))
 check("shadow: faculty served all-access", p is not None and p["campuses"] is None)
 check("shadow: registry consulted (would-be grant computed)", calls["faculty"] >= 1)
+check("shadow: would-be role/scope retained for durable audit",
+      p.get("_rbac_shadow", {}).get("outcome") == "allow"
+      and p["_rbac_shadow"].get("role") == "faculty"
+      and p["_rbac_shadow"].get("campus_scope") == ["noida"])
 reset(students={"kid@jaipuria.ac.in"})
 ps = principal_from_claims(claims("kid@jaipuria.ac.in"))
 check("shadow: STUDENT self-bounded, never all-access",
       ps is not None and ps["role"] == "student" and ps["campuses"] != None)
+check("shadow: student allow decision retained for durable audit",
+      ps.get("_rbac_shadow", {}).get("role") == "student"
+      and ps["_rbac_shadow"].get("campus_scope") == ["noida"])
+reset(rows={"ta@jaipuria.ac.in": {"name": "TA", "campuses": ["noida"], "active": True,
+                                  "role": "faculty"}},
+      students={"ta@jaipuria.ac.in"})
+dp = principal_from_claims(claims("ta@jaipuria.ac.in"))
+check("shadow: explicit educator grant wins for a dual-role student/TA",
+      dp is not None and dp["campuses"] is None and dp.get("role") != "student")
 
 print("MODE enforce — mcp_faculty is authoritative")
 set_mode("enforce")
@@ -237,9 +256,12 @@ reset(students={"stu@jaipuria.ac.in"})
 sp = principal_from_claims(claims("stu@jaipuria.ac.in"))
 check("enforce: student -> self-scoped principal (role=student, own id)",
       sp is not None and sp["role"] == "student" and sp["student_id"] == "ID_stu"
-      and sp["campuses"] == ["noida"])
+      and sp["campuses"] == ["noida"] and sp["batch"] == "2024-26")
 ssvc = MoodleService(None, sp)
-check("student svc carries self_student_id", ssvc.self_student_id == "ID_stu")
+check("student svc carries own student + batch scope",
+      ssvc.self_student_id == "ID_stu" and ssvc.self_batch == "2024-26")
+check("student cannot resolve a run for another batch without touching the DB",
+      ssvc.latest_run("noida", "2025-27") is None)
 
 
 class _FakeQ:
@@ -280,6 +302,37 @@ reset(students={"ghost@jaipuria.ac.in"})
 faculty._fetch_student_identity = lambda e: None
 check("student with unresolvable identity -> denied (never unbounded)",
       principal_from_claims(claims("ghost@jaipuria.ac.in")) is None)
+
+# A partial roster identity is also denied: student id alone is not enough to
+# constrain non-student-bearing scope metadata such as runs and course names.
+reset(students={"partial@jaipuria.ac.in"})
+faculty._fetch_student_identity = lambda e: {
+    "student_id": "ID_partial", "campus": "noida", "batch": ""
+}
+check("student with missing batch -> denied (never partially scoped)",
+      principal_from_claims(claims("partial@jaipuria.ac.in")) is None)
+
+print("Audience binding — a token minted for another Google app is rejected")
+set_mode("off")
+reset(students=())
+config.settings.google_oauth_client_id = "ours.apps.googleusercontent.com"
+
+
+def claims_aud(email, aud):
+    c = claims(email)
+    c["google_token_info"] = {"audience": aud}
+    return c
+
+
+check("audience mismatch -> denied (confused-deputy guard)",
+      principal_from_claims(claims_aud("prof@jaipuria.ac.in", "attacker.apps.googleusercontent.com"))
+      is None)
+check("audience matches our client -> allowed",
+      principal_from_claims(claims_aud("prof@jaipuria.ac.in", "ours.apps.googleusercontent.com"))
+      is not None)
+check("audience absent -> allowed (can't assert; OAuthProxy binds it server-side)",
+      principal_from_claims(claims("prof@jaipuria.ac.in")) is not None)
+config.settings.google_oauth_client_id = ""  # don't leak into other suites
 
 # leave the singleton mode back at off so import order can't leak into other suites
 set_mode("off")

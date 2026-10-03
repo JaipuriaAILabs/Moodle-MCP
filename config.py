@@ -44,8 +44,8 @@ class Settings(BaseSettings):
     # in addition to marking the Google OAuth app "Internal" to the Workspace).
     oauth_allowed_domains_raw: str = Field(default="jaipuria.ac.in",
                                            alias="OAUTH_ALLOWED_DOMAINS")
-    # Default for OTHER allowed domains with no explicit grant. Verified Jaipuria
-    # IDs always receive all campuses, regardless of this setting.
+    # Default for allowed-domain accounts with no explicit educator/student grant.
+    # ENFORCE deployments should keep this at "none" for default-deny/pending behavior.
     oauth_default_campuses_raw: str = Field(default="none", alias="OAUTH_DEFAULT_CAMPUSES")
     # Optional per-email overrides: JSON map email -> {name?, campuses} (null = all).
     mcp_faculty_raw: str = Field(default="", alias="MCP_FACULTY")
@@ -163,14 +163,14 @@ class Settings(BaseSettings):
 
     # --- per-campus RBAC (AIA campus scoping). Default OFF preserves today's behavior.
     #   off     : every verified jaipuria.ac.in account keeps all-campus access (the
-    #             historical "G1 all-access" policy) — the mcp_faculty registry is not
-    #             consulted for Jaipuria emails, so this path is unchanged and DB-free.
+    #             historical "G1 all-access" policy), except roster students are always
+    #             self-scoped (when enabled) or denied. Non-student login stays DB-free.
     #   shadow  : SERVE all-access unchanged, but for each Jaipuria caller also compute
     #             and LOG (prefix "rbac.shadow") the grant that ENFORCE would apply —
     #             role + campus scope, or a would-deny — so the roster can be validated
     #             against real traffic before flipping.
-    #   enforce : the mcp_faculty registry is authoritative for every account — role +
-    #             campus scope per email; unlisted / inactive / expired / student -> deny.
+    #   enforce : mcp_faculty is authoritative for educators; students are self-scoped
+    #             when enabled; unlisted accounts are pending or denied.
     rbac_mode_raw: str = Field(default="off", alias="MCP_RBAC_MODE")
     # Canonical campus codes (lowercase), used to validate grants against known campuses.
     campuses_raw: str = Field(default="noida,lucknow,jaipur,indore", alias="MCP_CAMPUSES")
@@ -178,6 +178,13 @@ class Settings(BaseSettings):
     # hard-denied — it gets a limited "pending" session that can only call request_access
     # (pick a campus+role → admin approval queue). Off = hard-deny unlisted accounts.
     self_service_access: bool = Field(default=True, alias="MCP_SELF_SERVICE_ACCESS")
+    # Optional approver notification for a newly filed self-service request. The
+    # database queue remains the source of truth; the webhook gets no requester
+    # identity (approvers use the admin-only queue for details).
+    access_request_webhook_url: str = Field(
+        default="", alias="MCP_ACCESS_REQUEST_WEBHOOK_URL")
+    access_request_webhook_secret: str = Field(
+        default="", alias="MCP_ACCESS_REQUEST_WEBHOOK_SECRET")
     # Student self-access: when on, a student (roster email) gets a session hard-bounded to
     # their OWN student_id — same tools, but every query is filtered to self, so one student
     # can never see another's data. Default OFF (students denied entirely) so this sensitive
@@ -436,13 +443,15 @@ def validate_config() -> None:
         mode = settings.rbac_mode()
         log.info("per-campus RBAC mode: %s (campuses=%s)", mode, ",".join(settings.campuses()))
         if mode == "off":
-            log.info("RBAC off — every verified jaipuria.ac.in Google account has all-campus access")
+            log.info("RBAC off — non-student jaipuria.ac.in accounts have all-campus access; "
+                     "roster students remain self-scoped or denied")
         elif mode == "shadow":
             log.info("RBAC shadow — serving all-campus access; logging would-be grants "
                      "(prefix 'rbac.shadow') for roster validation, no user-facing change")
         else:
-            log.warning("RBAC ENFORCE — access is role/campus-scoped from the mcp_faculty "
-                        "registry; unlisted/inactive/student jaipuria.ac.in accounts are DENIED")
+            log.warning("RBAC ENFORCE — educators are role/campus-scoped from mcp_faculty; "
+                        "students are self-scoped=%s; unlisted accounts are pending=%s or denied",
+                        settings.student_self_access, settings.self_service_access)
             if settings.oauth_default_campuses() != "deny":
                 log.warning("RBAC enforce with OAUTH_DEFAULT_CAMPUSES != none: any allowed-domain "
                             "account WITHOUT an mcp_faculty row still receives the default grant. "
@@ -462,6 +471,23 @@ def validate_config() -> None:
                            "and network attributes are pseudonymised before storage")
     if settings.require_audit and not settings.audit_enabled():
         raise RuntimeError("MCP_REQUIRE_AUDIT is enabled but SUPABASE_AUDIT_KEY is missing")
+
+    # Fail boot on a partial/plaintext notification configuration.
+    webhook_bits = (settings.access_request_webhook_url.strip(),
+                    settings.access_request_webhook_secret.strip())
+    if any(webhook_bits) and not all(webhook_bits):
+        raise RuntimeError("access-request webhook is half-configured: set BOTH "
+                           "MCP_ACCESS_REQUEST_WEBHOOK_URL and "
+                           "MCP_ACCESS_REQUEST_WEBHOOK_SECRET")
+    if all(webhook_bits):
+        parsed_webhook = urlsplit(webhook_bits[0])
+        if (parsed_webhook.scheme != "https" or not parsed_webhook.hostname
+                or parsed_webhook.username or parsed_webhook.password
+                or parsed_webhook.fragment):
+            raise RuntimeError("MCP_ACCESS_REQUEST_WEBHOOK_URL must be an https URL "
+                               "without credentials or a fragment")
+        if len(webhook_bits[1]) < 32:
+            raise RuntimeError("MCP_ACCESS_REQUEST_WEBHOOK_SECRET must be at least 32 characters")
 
     # create_report backend: fail-closed on a half-configured setup, and require https
     # so the Basic credentials never travel in the clear.

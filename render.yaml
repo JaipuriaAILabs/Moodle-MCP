@@ -50,34 +50,66 @@ services:
         value: "16384"
       - key: MCP_REDIS_URL
         sync: false
+      # true: trust Render's X-Forwarded-For so per-user source IP is recorded
+      # (and per-IP rate limiting keys on the real client, not Render's proxy).
       - key: MCP_TRUST_PROXY_HEADERS
-        value: "false"
+        value: "true"
       - key: MCP_ALLOWED_HOSTS
         value: moodle-mcp.tryrehearsal.ai
       - key: MCP_AUDIT_HMAC_KEY
         sync: false
       - key: MCP_REQUIRE_AUDIT
         value: "true"
+      # OpenTelemetry tracing → New Relic EU (account 8495484). Set the ingest/license
+      # key to turn tracing on (per-tool spans → error rate, p95 latency, throughput);
+      # unset = no telemetry. See monitoring/README.md.
+      - key: NEW_RELIC_LICENSE_KEY
+        sync: false
+      - key: MCP_OTEL_ENDPOINT
+        value: https://otlp.eu01.nr-data.net
       # Activity capture (AIA-1012). Each flag WIDENS mcp_audit.tool_calls.metadata
       # beyond the privacy-safe default. All "false" here = today's behaviour (only a
       # pseudonymised event is stored). Turn on to record real identity / full tool
       # arguments / result payloads / source IP — student PII + who-viewed-whom, so
       # gate them behind a decided retention + privacy-notice posture, and never
       # mirror the raw values to New Relic. Size caps bound each row.
+      # MEASURED activity recording ("to an extent", data-owner decision 2026-09-21):
+      # capture WHO did WHAT — real identity + the call arguments (which student was
+      # queried) + source IP + connection events — but NOT the returned result payloads
+      # (RESULTS=false), so the audit ledger does not duplicate every student's marks.
+      # That gives full accountability/traceability (AIA-1210) with far less PII.
+      # REQUIRES, to persist: the mcp_audit backend applied (sql/2026-09-18_...) AND
+      # SUPABASE_AUDIT_KEY (mcp_audit_writer JWT) + MCP_AUDIT_HMAC_KEY set below.
+      # Keep raw PII in this locked schema only — never mirror it to New Relic.
       - key: MCP_CAPTURE_IDENTITY
-        value: "false"
+        value: "true"
       - key: MCP_CAPTURE_ARGUMENTS
-        value: "false"
+        value: "true"
       - key: MCP_CAPTURE_RESULTS
-        value: "false"
+        value: "false"          # measured level — don't duplicate returned marks into the log
       - key: MCP_CAPTURE_CLIENT_IP
-        value: "false"
+        value: "true"
       - key: MCP_CAPTURE_ARGS_MAX_BYTES
-        value: "4096"
+        value: "32768"
       - key: MCP_CAPTURE_RESULT_MAX_BYTES
-        value: "8192"
-      # Default for other allowed domains only. Verified Jaipuria IDs get all
-      # campuses in code, including when this legacy setting remains "none".
+        value: "262144"
+      # Keep RBAC explicitly staged. Move off -> shadow -> enforce only after the
+      # grant roster and would-deny telemetry have been reviewed.
+      - key: MCP_RBAC_MODE
+        value: "off"
+      - key: MCP_CAMPUSES
+        value: noida,lucknow,jaipur,indore
+      - key: MCP_STUDENT_SELF_ACCESS
+        value: "false"
+      - key: MCP_SELF_SERVICE_ACCESS
+        value: "true"
+      # Optional identity-free access-request relay. Configure both values together;
+      # leaving both blank keeps notification disabled and the DB queue authoritative.
+      - key: MCP_ACCESS_REQUEST_WEBHOOK_URL
+        sync: false
+      - key: MCP_ACCESS_REQUEST_WEBHOOK_SECRET
+        sync: false
+      # ENFORCE should keep the unlisted-account default at deny/pending.
       - key: OAUTH_DEFAULT_CAMPUSES
         value: none
       - key: MCP_FACULTY

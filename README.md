@@ -175,6 +175,10 @@ boot check on the Supabase vars.
 | `MCP_SERVER_BASE_URL` | Public URL of this service (optional) | Render dashboard |
 | `MCP_RATE_LIMIT` | Tool calls allowed per token per window (default `90`) | — |
 | `MCP_RATE_WINDOW_SECONDS` | Rate-limit window in seconds (default `60`) | — |
+| `MCP_RBAC_MODE` | `off`, `shadow`, or `enforce`; use the documented staged cutover | — |
+| `MCP_STUDENT_SELF_ACCESS` | Enables the self-id + batch-bounded student principal (default `false`) | — |
+| `MCP_ACCESS_REQUEST_WEBHOOK_URL` | Optional HTTPS approver relay; receives role/campus only | Approved relay |
+| `MCP_ACCESS_REQUEST_WEBHOOK_SECRET` | 32+ character HMAC key paired with the webhook URL | You generate it |
 
 Malformed `MCP_TOKENS` (bad JSON or wrong shape) **fails the boot loudly** rather than silently
 locking everyone out; short tokens log a warning. **All logging goes to stderr; audit lines record
@@ -184,10 +188,13 @@ who / which tool / campus scope / outcome and never contain token contents, stud
 
 ## Access model
 
-Every verified Jaipuria Google account, including accounts in the student roster, can use all
-tools across all campuses. Google email verification is required, and lookalike domains are
-rejected. The legacy static-token mode and explicitly granted external OAuth accounts retain
-their configured campus scopes; every tool intersects a requested campus with that grant.
+Google email verification is required and lookalike domains are rejected. In `enforce` mode,
+educators receive only their active registry role/campuses; unlisted educators are pending or
+denied. Student-roster accounts are never granted cohort-wide access in any mode: they are denied
+unless `MCP_STUDENT_SELF_ACCESS=true`, then every student-bearing query is forced to their own
+student id, campus, and batch. An explicit educator grant wins for a legitimate dual-role TA.
+`off` and `shadow` retain historical all-campus educator access only; `shadow` also records the
+would-be enforced decision for cutover analysis. See `docs/ACCESS_AND_PII_MODEL.md`.
 
 Generate a per-campus token block:
 ```bash

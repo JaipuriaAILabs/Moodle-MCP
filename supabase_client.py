@@ -63,6 +63,10 @@ class MoodleService:
             str(principal["student_id"]).strip()
             if principal.get("role") == "student" and principal.get("student_id") else None
         )
+        self.self_batch = (
+            str(principal["batch"]).strip()
+            if self.self_student_id and principal.get("batch") else None
+        )
 
     def apply_student(self, query, col: str = "student_id"):
         """Bound a query to the caller's own student_id when they are a student; no-op otherwise.
@@ -96,6 +100,8 @@ class MoodleService:
         # to resolve a run for a campus outside the caller's grant, so a tool that
         # forgets the explicit campus_scope() guard can never leak another campus.
         if self.campus_scope(campus) == []:
+            return None
+        if self.self_batch is not None and batch != self.self_batch:
             return None
         purpose = purpose or settings.report_purpose
         key = (campus, batch, purpose)

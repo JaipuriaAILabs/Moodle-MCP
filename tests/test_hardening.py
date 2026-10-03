@@ -445,6 +445,8 @@ def phase6_oauth_compat():
         base_url="https://mcp.example.com",
         required_scopes=["openid"],
     )
+    check("OAuth proxy consent screen is required (confused-deputy protection)",
+          provider._require_authorization_consent is True)
 
     class FakeStore:
         def __init__(self, model):

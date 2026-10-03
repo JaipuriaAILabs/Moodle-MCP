@@ -1,8 +1,8 @@
 """Jaipuria Moodle Reports MCP — Google-authenticated institutional reports.
 
 Exposes the generated student reports and deterministic cohort analytics from the
-student-report-system Supabase project. Every DB tool is SELECT-only
-and scoped to the caller's allowed campuses (all campuses for verified Jaipuria IDs).
+student-report-system Supabase project. Every DB tool is SELECT-only and scoped to
+the caller's allowed campuses or, for a student session, the caller's own student row.
 The single write-path tool (create_report)
 delegates generation to the moodle-agent service over authenticated https — this server's own
 DB credential never writes. No ingestion, no mailing.
@@ -66,9 +66,9 @@ INSTRUCTIONS = (
 # Interactive auth: when Google OAuth credentials are configured, serve the full MCP
 # OAuth flow (discovery metadata, dynamic client registration, Google consent) so hosts
 # like Claude.ai sign each user in with their jaipuria.ac.in Google account —
-# no manual bearer token. Verified Jaipuria IDs receive all-campus access in
-# security.principal_from_claims (and the Google OAuth app should be "Internal" to the
-# Workspace as the first gate). Without OAuth creds, legacy static tokens still work.
+# no manual bearer token. ``security.principal_from_claims`` applies the configured
+# RBAC/student policy after Google verifies identity (and the Google OAuth app should be
+# "Internal" to the Workspace as the first gate). Without OAuth creds, legacy static tokens work.
 auth_provider = None
 if settings.oauth_enabled():
     from oauth_compat import TolerantGoogleProvider as GoogleProvider
@@ -79,6 +79,10 @@ if settings.oauth_enabled():
         required_scopes=["openid",
                          "https://www.googleapis.com/auth/userinfo.email",
                          "https://www.googleapis.com/auth/userinfo.profile"],
+        # FastMCP 3's browser-bound consent step fixes the OAuthProxy confused-
+        # deputy class (PYSEC-2026-2476). Keep this explicit so a future default
+        # change cannot silently remove that protection.
+        require_authorization_consent=True,
     )
     if settings.oauth_jwt_signing_key:
         _google_kwargs["jwt_signing_key"] = settings.oauth_jwt_signing_key
@@ -135,9 +139,9 @@ mcp.add_middleware(build_middleware(settings.rate_limit, settings.rate_window_se
 
 async def get_authenticated_service():
     """Single auth dependency → a campus-scoped service. Fail-closed.
-    OAuth mode: FastMCP has already verified the token; we map its Google claims to a
-    principal (verified Jaipuria accounts get all campuses) — a verified token from an
-    unapproved account still gets PermissionError here. Legacy mode: constant-time
+    OAuth mode: FastMCP has already verified the token; we map its Google claims to an
+    RBAC/student-scoped principal — a verified token without an allowed session still gets
+    PermissionError here. Legacy mode: constant-time
     static-token lookup, defense-in-depth behind TransportGuard's 401."""
     from fastmcp.server.dependencies import get_http_headers
 

@@ -188,7 +188,9 @@ BANNED anywhere in track text (title, learning, interview): digits, "%", "score"
         req = urllib.request.Request("https://openrouter.ai/api/v1/chat/completions", data=json.dumps(body).encode(),
                                      headers={"Authorization": f"Bearer {openrouter_key()}", "Content-Type": "application/json",
                                               "HTTP-Referer": "https://tryrehearsal.ai", "X-Title": "Jaipuria student report"})
-        return json.load(urllib.request.urlopen(req, timeout=180))
+        # Fixed, code-owned HTTPS endpoint above; neither user input nor report data
+        # can alter the scheme or host (reviewed B310 call).
+        return json.load(urllib.request.urlopen(req, timeout=180))  # nosec B310
 
     # Model-agnostic: prefer structured output, but fall back to the prompt's own JSON
     # contract for providers that reject the response_format parameter or ignore it.

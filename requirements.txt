@@ -1,5 +1,7 @@
-# Pinned exactly: oauth_compat.TolerantGoogleProvider mirrors 2.14.7 internals.
-fastmcp==2.14.7
+# Pinned exactly: first maintained 3.x patch line with the full OAuth/CSRF security
+# pass and Starlette CVE floor. oauth_compat's narrow code-store override is covered
+# by tests/test_hardening.py. Do not downgrade below 3.2.0 (PYSEC-2026-2475/2476).
+fastmcp==3.4.5
 supabase>=2.5.0
 pydantic>=2.0
 pydantic-settings>=2.0

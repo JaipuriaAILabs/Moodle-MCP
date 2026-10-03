@@ -309,18 +309,23 @@ def end_span(span, outcome: str | None = None, error_code=None, attributes=None)
 
 
 def record_tool_metric(tool: str, outcome: str, error_code=None,
-                       scope=None, duration_s: float | None = None) -> None:
+                       scope=None, duration_s: float | None = None,
+                       authorization: dict | None = None) -> None:
     """Emit the tool-call counter + duration histogram. No-op when metrics are off.
     Never raises. Attribute cardinality is deliberately bounded (tool + outcome +
-    error_code + all/scoped) so New Relic metric cost stays flat at 5k users."""
+    error_code + all/scoped/none + bounded role/shadow outcome) so New Relic
+    metric cost stays flat at 5k users."""
     # Disabled hot path (SDK installed but no provider): _end_tool_span calls this on
     # every tool call, so skip building the attrs dict when no instrument exists.
     if _tool_calls is None and _tool_duration is None:
         return
     try:
+        scope_class = "all" if not scope or scope == "all" else (
+            "none" if scope == "none" else "scoped")
         attrs = {"mcp.tool": tool, "mcp.outcome": outcome,
                  "mcp.error_code": error_code or "none",
-                 "mcp.campus_scope": "scoped" if scope else "all"}
+                 "mcp.campus_scope": scope_class}
+        attrs.update(authorization or {})
         if _tool_calls is not None:
             _tool_calls.add(1, attrs)
         if _tool_duration is not None and duration_s is not None:

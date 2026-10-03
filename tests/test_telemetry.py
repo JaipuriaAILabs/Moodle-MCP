@@ -56,7 +56,15 @@ check("explicit MCP_OTEL_HEADERS parsed",
 
 print("\n[ setup never raises; returns a bool ]")
 _set(new_relic_license_key="NRAK-testkey", otel_headers_raw="")
-res = telemetry.setup_telemetry(settings)  # True if SDK installed, False if not — never raises
+# Do not let an offline test install real exporters or attempt the network when the
+# optional SDK is present. setup_telemetry orchestration is what this case covers;
+# the signal builders have their own import/error guards in production.
+_orig_builders = (telemetry._setup_traces, telemetry._setup_metrics, telemetry._setup_logs)
+telemetry._setup_traces = lambda *_args: True
+telemetry._setup_metrics = lambda *_args: True
+telemetry._setup_logs = lambda *_args: True
+res = telemetry.setup_telemetry(settings)
+telemetry._setup_traces, telemetry._setup_metrics, telemetry._setup_logs = _orig_builders
 check("setup_telemetry returns a bool (no exception)", isinstance(res, bool))
 
 print("\n[ tool span helpers are safe no-ops ]")
@@ -66,6 +74,14 @@ security._end_tool_span(span, "failure", "unauthorized", None)
 security._end_tool_span(None, "failure", "rate_limited", None)  # explicit None path
 check("start/end tool span never raise", True)
 check("get_tracer() returns something or None", telemetry.get_tracer() is not None or True)
+attrs = security._authorization_attributes({
+    "role": "cross_campus", "campuses": None,
+    "_rbac_shadow": {"outcome": "deny"}})
+check("bounded role + shadow outcome telemetry attributes",
+      attrs == {"mcp.role": "cross_campus", "mcp.rbac_shadow_outcome": "deny"})
+check("unknown roles collapse to bounded 'other' cardinality",
+      security._authorization_attributes({"role": "invented", "campuses": []})["mcp.role"]
+      == "other")
 
 print("\n[ generic auth span helpers are safe no-ops ]")
 asp = telemetry.start_span("mcp.auth")
@@ -94,6 +110,9 @@ check("traces + metrics on by default, logs OFF (PII caution)",
 print("\n[ metric + shutdown helpers are safe no-ops ]")
 telemetry.record_tool_metric("get_student", "success", None, "noida", 0.012)  # must not raise
 telemetry.record_tool_metric("whoami", "failure", "unauthorized", None, None)
+telemetry.record_tool_metric("request_access", "success", None, "none", 0.001,
+                             {"mcp.role": "pending",
+                              "mcp.rbac_shadow_outcome": "not_applicable"})
 telemetry.record_auth_metric("oauth", "success")
 telemetry.record_auth_metric("static", "failure")
 telemetry.shutdown_telemetry()   # installed or not — idempotent, never raises

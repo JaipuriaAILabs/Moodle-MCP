@@ -5,6 +5,10 @@ reliable for ~5,000 students + professors through JChat." Grouped by priority wi
 owner and rough effort. **P0 = launch blocker.** Synthesised from the Sept 2026
 hardening + JChat-integration + activity-recording work.
 
+> Updated 2026-10-01: repository security closure and current validation evidence are in
+> `SECURITY_AUDIT_2026-10-01.md`. Items below marked as code-complete still require their stated
+> production configuration or institutional approval.
+
 Legend — owner: **ops** (Render/Supabase/env, not doable from code), **eng** (this
 repo), **rajika** (JChat repo), **decision** (data owner).
 
@@ -44,14 +48,13 @@ money-spending tool (`_enforce_report_budget`, default 60/user/hour via
 LLM generation under open access. Redis-backed when `MCP_REDIS_URL` is set (so set it —
 0.4 — for the cap to hold across instances). *(eng — shipped)*
 
-**0.5 Governance sign-off for all-access + full recording.** Every `jaipuria.ac.in`
-account (incl. ~2,800 students) has **all-campus, faculty-level** access, and recording
-now stores **real identity + which student records each person viewed + the marks
-returned**, for everyone. That is the data owner's stated choice — but before launch:
-lock the `mcp_audit` schema to admins only; publish a privacy-notice line; keep raw PII
-out of New Relic; confirm 180-day retention (`purge_expired_mcp_security_data`). If
-"students see only their own data" is ever wanted, that's the gateway RBAC or an in-MCP
-student self-scope (both scoped, not built). *(decision + ops · ½ day)*
+**0.5 Governance sign-off for RBAC + recording.** OFF/SHADOW retain historical all-campus
+access for non-student Jaipuria accounts, but roster students can no longer inherit that
+fallback: they are denied or hard-bounded to their own student/campus/batch. ENFORCE supports
+explicit role/campus educator grants. Before launch, choose the mode and whether direct student
+access is enabled; lock `mcp_audit` to admins; publish a privacy notice; keep raw PII out of New
+Relic; confirm 180-day retention (`purge_expired_mcp_security_data`). Identity/argument/result
+capture remains separately opt-in. *(decision + ops; eng shipped)*
 
 ---
 
@@ -71,13 +74,15 @@ queue mode (migration 0014, applied) + a worker scales it. Confirm `AGENT_REPORT
 + `AGENT_SHARED_SECRET`, and that the **moodle-agent** service is also off the free
 plan. S3 report caching (shipped) limits regen cost. *(ops + eng · 1 day)*
 
-**1.2 Monitoring & alerting.** The MCP emits **no OTel/metrics** — Supabase audit +
-stderr only. → Add New Relic (EU acct 8495484): health/uptime, error-rate, p95 latency
-per tool, active users; alert on 5xx spikes and health failures. The `mcp_audit`
-ledger + `v_activity` view give the usage dashboards. *(eng · 2 days)*
+**1.2 Monitoring & alerting (code complete; ops activation required).** The MCP emits
+PII-safe OpenTelemetry traces/metrics with bounded tool, outcome, role, effective campus-scope,
+and shadow-decision dimensions; `NR_ALERTS.md` contains the alert queries. Configure the New Relic
+license/OTLP environment and create the production health, error-rate, p95, would-deny and uptime
+alerts. The `mcp_audit` ledger + `v_activity` view remain the detailed activity source.
+*(ops; eng shipped)*
 
-**1.3 CI gate.** 206 tests exist but nothing runs them on PRs. → GitHub Actions:
-import check + all `tests/*.py` on every PR to `main`. *(eng · 2 h)*
+**1.3 CI gate (done).** GitHub Actions runs the repository tests on PRs/pushes and now includes
+`pip-audit` plus Bandit; Dependabot covers Python and Actions dependencies. *(eng shipped)*
 
 **1.4 JChat prompt correlation.** Add the `X-Request-Id` header (see
 `docs/JCHAT_PROMPT_CORRELATION.md`) so activity joins to the prompt that caused it.
@@ -101,9 +106,10 @@ service actually reconnects OAuth sessions across deploys now that keys are pinn
 - **2.2 S3 offload for oversized capture.** Payloads > 256 KB store a size-marked
   preview; add a Supabase Storage offload (pointer in the row) if truly-complete large
   payloads are required. *(eng · 1 day)*
-- **2.3 Deploy the gateway** (`rehearsal-mcp-gateway`, PR #1) for per-tool RBAC + single
-  ingress — also resolves 0.4 (rate-limit origin) and enables student-scoping later.
-  *(eng/ops)*
+- **2.3 Deploy the gateway** (`rehearsal-mcp-gateway`, PR #1) for a single trusted ingress and
+  another authorization layer — also resolves 0.4 (rate-limit origin). Application-level
+  educator campus RBAC and student self-scope now exist; database RLS still needs the separate
+  per-request claim design described in `ACCESS_AND_PII_MODEL.md`. *(eng/ops)*
 - **2.4 Scheduled purge.** pg_cron `select public.purge_expired_mcp_security_data();`
   daily, so audit + OAuth state respect retention automatically. *(ops)*
 - **2.5 Load test** the target concurrency (ramp 150 → 500 → 5,000) before the full
@@ -120,7 +126,7 @@ service actually reconnects OAuth sessions across deploys now that keys are pinn
 5. [ ] Governance: `mcp_audit` locked to admins, privacy notice, retention (0.5)
 6. [ ] Report queue + worker; moodle-agent off free plan (1.1)
 7. [ ] New Relic health/error/latency alerts live (1.2)
-8. [ ] CI running tests on PRs (1.3)
+8. [x] CI running tests plus dependency/static security scans on PRs (1.3)
 9. [ ] JChat `X-Request-Id` header deployed; join verified (1.4)
 10. [ ] Cohort ramp 150 → 500 → 5,000 with monitoring (2.5)
 
@@ -132,3 +138,12 @@ service actually reconnects OAuth sessions across deploys now that keys are pinn
   capture-ON `render.yaml` (uncommitted — enabling mass PII capture is classifier-gated
   from here, so a human commits it).
 - **Not started:** hosting plan flip, Redis, monitoring, CI, gateway, load test.
+
+## Status update (2026-10-01)
+
+- **Code complete:** student self/campus/batch isolation, educator RBAC modes, durable authorization
+  audit dimensions, PII-safe OTel telemetry, FastMCP 3.4.5 security upgrade, CI security gates,
+  signed identity-free access notifications, and report capability-link rate limiting/auditing.
+- **Awaiting ops/decision:** paid-plan verification, stable production keys, Redis/gateway choice,
+  migration/capture/retention activation, real grant seeding and ENFORCE cutover, New Relic alert
+  creation, live privacy notice, JChat correlation, restore drill, and cohort load test.

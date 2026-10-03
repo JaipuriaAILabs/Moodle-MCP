@@ -83,20 +83,61 @@ def _summarise_result(result, cap: int):
         return {"_error": "summary_failed"}
 
 
+def _authorization(identity) -> dict | None:
+    """Return non-PII authorization context that is safe to retain by default.
+
+    Email/name/student ids remain behind ``MCP_CAPTURE_IDENTITY``.  Role, effective
+    campus scope, capability and self/batch-bound booleans are authorization facts,
+    not raw identity, and are needed to prove that RBAC was actually applied.
+    """
+    if not isinstance(identity, dict):
+        return None
+    campuses = identity.get("campuses")
+    if campuses is None:
+        campus_scope: str | list[str] = "all"
+    elif isinstance(campuses, (list, tuple, set)):
+        campus_scope = sorted({str(c).strip().lower() for c in campuses if str(c).strip()})
+    else:
+        campus_scope = "none"
+    role = str(identity.get("role") or (
+        "cross_campus" if campuses is None else "faculty")).strip().lower()
+    authorization = {
+        "role": role[:32],
+        "campus_scope": campus_scope,
+        "can_generate": bool(identity.get("can_generate", role not in ("pending", "viewer"))),
+        "student_self_bound": bool(role == "student" and identity.get("student_id")),
+        "student_batch_bound": bool(role == "student" and identity.get("batch")),
+    }
+    shadow = identity.get("_rbac_shadow")
+    if isinstance(shadow, dict):
+        # Copy only the deliberately bounded fields. Never allow arbitrary principal
+        # content to hitch a ride into the always-on audit metadata.
+        authorization["shadow"] = {
+            key: shadow[key] for key in ("outcome", "role", "campus_scope", "can_generate")
+            if key in shadow
+        }
+    return authorization
+
+
 def build_metadata(*, identity=None, arguments=None, result=None,
                    source_ip: str | None = None) -> dict:
     """Assemble the audit `metadata` blob, gated by the MCP_CAPTURE_* flags.
 
-    With every flag at its default (off) this returns only the server version —
-    identical to the historic privacy-safe behaviour. Turning a flag on widens
-    capture to real identity / full arguments / result payload / source IP.
+    With every capture flag at its default (off), this retains only the server
+    version and non-PII authorization facts. Turning a flag on widens capture to
+    real identity / full arguments / result payload / source IP.
     This is a pure function so the gating can be unit-tested without a network.
     """
     meta: dict = {"server_version": settings.server_version}
+    authorization = _authorization(identity)
+    if authorization is not None:
+        meta["authorization"] = authorization
     if settings.capture_identity and isinstance(identity, dict):
         # Keep campuses even when None — None is meaningful here (all-campus grant),
         # so it must be recorded, not treated as "absent".
-        meta["identity"] = {k: identity.get(k) for k in ("email", "name", "campuses")}
+        meta["identity"] = {
+            k: identity.get(k) for k in ("email", "name", "campuses", "role")
+        }
     if settings.capture_client_ip and source_ip:
         meta["source_ip"] = str(source_ip)[:64]
     if settings.capture_arguments and arguments is not None:

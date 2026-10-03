@@ -35,11 +35,16 @@ def _list_impl(svc, p: ScopeParams) -> dict:
     if not run_id:
         return {"available": False, "note": "no completed run for this scope"}
     courses = courses_for(svc, run_id, p.trimester)
-    enr = (svc.client.table("enrolments").select("course_id,student_id")
-           .eq("run_id", run_id).limit(100000).execute()).data or []
+    enr_q = (svc.client.table("enrolments").select("course_id,student_id")
+             .eq("run_id", run_id))
+    enr = (svc.apply_student(enr_q).limit(100000).execute()).data or []
     counts = defaultdict(set)
     for e in enr:
         counts[e["course_id"]].add(e["student_id"])
+    if getattr(svc, "self_student_id", None):
+        # Do not expose the wider campus curriculum to a student session; keep only
+        # courses in which the caller's own row appears after the self filter above.
+        courses = {cid: meta for cid, meta in courses.items() if counts.get(cid)}
     by_subject = defaultdict(lambda: {"trimester": None, "sections": 0, "students": set()})
     for cid, meta in courses.items():
         s = by_subject[meta["subject"]]

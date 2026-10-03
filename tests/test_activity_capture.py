@@ -1,9 +1,8 @@
 """Activity-capture gating verification (plain asserts; no pytest infra here).
 
 Proves the MCP_CAPTURE_* flags widen the audit `metadata` blob exactly as
-intended, and that with every flag OFF (the default) capture stays byte-for-byte
-the historic privacy-safe shape — enabling audit alone must never start logging
-identity, arguments, results or IP.
+intended, and that with every flag OFF (the default) only non-PII authorization
+facts remain — enabling audit alone must never log identity, arguments, results or IP.
 
 Run:  ../moodle-agent/.venv/bin/python tests/test_activity_capture.py
 from the moodle-mcp directory.
@@ -32,7 +31,8 @@ def check(name, cond):
 
 
 PRINCIPAL = {"email": "faculty@jaipuria.ac.in", "name": "A Faculty",
-             "campuses": None, "sub": "google-123"}
+             "campuses": None, "sub": "google-123", "role": "cross_campus",
+             "can_generate": True}
 ARGS = {"params": {"student_id": "Aashna Gupta", "campus": "Jaipur"}}
 
 
@@ -60,11 +60,25 @@ _set(capture_identity=False, capture_arguments=False, capture_results=False,
      capture_client_ip=False)
 meta = audit_store.build_metadata(identity=PRINCIPAL, arguments=ARGS,
                                   result=_Result(), source_ip="10.1.2.3")
-check("only server_version present", set(meta) == {"server_version"})
+check("only server_version + authorization present",
+      set(meta) == {"server_version", "authorization"})
+check("authorization records role + all-campus scope",
+      meta["authorization"]["role"] == "cross_campus"
+      and meta["authorization"]["campus_scope"] == "all")
 check("no identity leaked", "identity" not in meta)
 check("no arguments leaked", "arguments" not in meta)
 check("no result leaked", "result" not in meta)
 check("no source_ip leaked", "source_ip" not in meta)
+check("raw identity absent from privacy-safe metadata",
+      "faculty@jaipuria.ac.in" not in str(meta) and "A Faculty" not in str(meta))
+
+student = dict(PRINCIPAL, role="student", campuses=["noida"],
+               student_id="N24X", batch="2024-26")
+student_meta = audit_store.build_metadata(identity=student)
+check("student audit proves self + batch boundaries without recording ids",
+      student_meta["authorization"]["student_self_bound"] is True
+      and student_meta["authorization"]["student_batch_bound"] is True
+      and "N24X" not in str(student_meta) and "2024-26" not in str(student_meta))
 
 
 # --------------------------------------------------------------------------

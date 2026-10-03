@@ -19,6 +19,7 @@ import json
 import os
 import sys
 import urllib.request
+from urllib.parse import urlsplit
 
 VALID_ROLES = {"admin", "cross_campus", "campus_admin", "faculty", "viewer"}
 ALL_ROLES = {"admin", "cross_campus"}          # must have campuses = "all"
@@ -78,6 +79,14 @@ def main() -> int:
         print("ERROR: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or use --dry-run).",
               file=sys.stderr)
         return 2
+    if not dry:
+        parsed_url = urlsplit(url)
+        if (parsed_url.scheme != "https" or not parsed_url.hostname
+                or parsed_url.username or parsed_url.password
+                or parsed_url.query or parsed_url.fragment):
+            print("ERROR: SUPABASE_URL must be HTTPS without credentials, query, or fragment.",
+                  file=sys.stderr)
+            return 2
 
     rows, errors = [], []
     with open(args[0], newline="", encoding="utf-8") as fh:
@@ -110,7 +119,8 @@ def main() -> int:
                  "Content-Type": "application/json",
                  "Prefer": "resolution=merge-duplicates,return=minimal"})
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        # SUPABASE_URL was constrained to a credential-free HTTPS authority above.
+        with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310
             print(f"\nUpserted {len(rows)} row(s) — HTTP {resp.status}.")
     except urllib.error.HTTPError as e:
         print(f"\nUpsert FAILED HTTP {e.code}: {e.read().decode()[:500]}", file=sys.stderr)

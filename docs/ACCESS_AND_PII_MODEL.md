@@ -66,10 +66,12 @@ rehearsal "student MCP", which already uses per-user RLS). Design:
 
 - **Self-scope key:** the caller's own `student_id` (from classification). Every student query is filtered
   to that id — never a campus set.
-- **Restricted tool surface:** a student sees only self tools (`my_marks`, `my_attendance`,
-  `my_trajectory`, `my_report`). All cohort/roster/other-student tools are **not available** to the student
-  class (denied, not just empty). A student passing another id is ignored — the id is taken from their
-  identity, never from input.
+- **Self-bound tool behaviour (implemented):** students currently see the same tool names as educators,
+  but every student-bearing query is forced to their own `student_id`. A student passing another id gets
+  no other-student result, and `create_report` replaces the supplied target with the caller's own id.
+  Roster/cohort tools therefore collapse to the caller's own row rather than exposing classmates. If a
+  smaller `my_*`-only discovery surface is still desired for UX, add it separately; it is not the security
+  boundary.
 - **DB defense-in-depth:** per-student RLS so even a server bug can't return another student's rows
   (mirrors the rehearsal student MCP). This needs per-request identity context at the DB (see §7).
 - **PII:** a student sees their *own* name (it's theirs) in the rehydrated output, but the LLM still gets
@@ -128,34 +130,49 @@ small-n together where avoidable.
 
 ---
 
-## 8. Built vs new
+## 8. Current build status (refreshed 2026-10-01)
 
-**Built (Phases 0–2):** Google-only auth; educator campus scoping; roles faculty/campus_admin/
+**Built, dormant-safe:** Google-only auth; educator campus scoping; roles faculty/campus_admin/
 cross_campus(director)/admin/viewer; self-service `request_access` + approval; `mcp_faculty` hardened;
-shadow mode live.
+student classification + `student_id` row-owner and batch boundaries. Student access remains off until
+`MCP_STUDENT_SELF_ACCESS=true`. Students currently use the same tool names as educators, but every
+student-bearing query is forced through `MoodleService.apply_student()` and `create_report` replaces
+any supplied target with the caller's own id. The 2026-10-01 isolation audit also closed direct-query
+holes in roster, enrolment counts, report availability, cached narratives, and declining-student name
+lookups. An explicit educator grant wins for a legitimate dual-role student/TA in every RBAC mode.
+Every audit event now retains identity-free role/effective-scope/self-bound facts, shadow decisions
+are durable in the audit ledger and bounded New Relic dimensions, and access requests can send a
+signed identity-free webhook nudge (`MCP_ACCESS_REQUEST_WEBHOOK_*`). The administrator-only queue
+remains the only place where requester identity is disclosed. Receiver verification is documented in
+`docs/ACCESS_REQUEST_NOTIFICATIONS.md`.
 
-**New in this plan:**
-- **S1 — Student class:** classification precedence (§3) + student principal (self-scope by `student_id`).
-- **S2 — Student tool surface:** `my_*` self tools; class-gate cohort tools off for students.
+**Still to build:**
 - **P1 — LLM-blind PII (MCP side):** tokenise identity in LLM-facing payloads + `_identity` side map +
   `resolve_identities` tool; generalise the create_report name-omission pattern.
 - **P2 — LLM-blind PII (harness side, AIA-1356/Rajika):** strip/substitute/rehydrate around the model.
-- **A1 — Backend ping:** notify approvers on `request_access` insert.
-- **D1 — DB RLS:** per-student + per-campus RLS (defense-in-depth, last).
+  P1 alone is not a privacy boundary because the MCP cannot rehydrate the model's response.
+- **D1 — DB RLS:** per-student + per-campus RLS (defense-in-depth). The application boundary is active;
+  the shared read-only database credential can still read all campuses if application filtering regresses.
 
-Suggested order: **P1 (MCP tokenisation)** and **S1/S2 (student self-access)** first (both MCP-side, high
-value), then **A1 ping**, then **P2** with Rajika, then **D1**. All ship dormant-safe behind the existing
-`MCP_RBAC_MODE`/flags and the shadow→enforce rollout.
+**Still to activate/verify operationally:** seed/approve educator grants, complete the shadow review,
+flip `MCP_RBAC_MODE=enforce`, decide whether to enable `MCP_STUDENT_SELF_ACCESS`, update/publish the
+privacy notice, and run two-user cross-campus plus two-student isolation smokes against the deployed
+service. Repository state cannot prove those live-environment steps.
+
+Suggested next build order: **P1 + P2 together** (so pseudonymization is end-to-end), then **D1**.
+P2 requires the JChat/harness source, which is not present in either attached repository; do not ship
+P1 alone and call it a privacy boundary. Keep each change flag-gated through shadow→enforce rollout.
 
 ---
 
 ## 9. Open decisions
 
-1. **Do students use this MCP directly, or a separate student surface?** (Plan assumes same MCP, student
-   class + restricted tools. A separate student-facing server is the alternative.)
+1. **Do students use this MCP directly, or a separate student surface?** (Current build assumes the same
+   MCP with a self-bound student class. A smaller `my_*` discovery surface or a separate server remains
+   a UX/product choice, not the row-isolation boundary.)
 2. **Token reversibility scope:** per-request ephemeral map (safest, no stored name↔token) vs a stable
    stored pseudonym table (enables cross-session analytics on tokens). Recommend per-request ephemeral.
-3. **Ping channel:** email vs webhook/Slack for approver notifications.
+3. **Ping destination:** choose the approved relay/channel and configure the signed, identity-free webhook.
 4. **Student PII in create_report:** a student's own report shows their own name (fine); confirm.
 5. **Directors:** map "director" to `cross_campus` (all read + report) or full `admin` (also manages
    access)? Recommend `cross_campus` for directors; `admin` reserved for the platform owner.

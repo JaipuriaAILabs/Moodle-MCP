@@ -189,9 +189,10 @@ def _declining_impl(svc, p: ScopeParams) -> dict:
         return {"available": False, "note": "no completed run"}
     all_courses = courses_for(svc, run_id)  # all trimesters — trajectory needs history
     tri_of = {cid: m["trimester"] for cid, m in all_courses.items()}
+    names_q = (svc.client.table("students").select("student_id,student_name")
+               .eq("run_id", run_id))
     names = {r["student_id"]: r.get("student_name") for r in
-             (svc.client.table("students").select("student_id,student_name")
-              .eq("run_id", run_id).limit(100000).execute()).data or []}
+             (svc.apply_student(names_q).limit(100000).execute()).data or []}
     marks = scope_marks(svc, run_id, list(all_courses))
     agg = defaultdict(lambda: defaultdict(lambda: [0.0, 0.0]))  # student -> tri -> [obt,max]
     for m in marks:

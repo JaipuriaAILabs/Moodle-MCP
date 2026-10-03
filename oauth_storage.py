@@ -20,8 +20,15 @@ import random
 
 import httpx
 from key_value.aio.stores.base import BaseStore
-from key_value.shared.utils.managed_entry import ManagedEntry
-from key_value.shared.utils.serialization import BasicSerializationAdapter
+# py-key-value-aio 0.4 (required by FastMCP 3) made its utility package async-local.
+# Keep a fallback solely so an in-place rolling deploy can import during dependency
+# replacement; the production pin resolves the first branch.
+try:
+    from key_value.aio._utils.managed_entry import ManagedEntry
+    from key_value.aio._utils.serialization import BasicSerializationAdapter
+except ImportError:  # pragma: no cover - FastMCP 2 rolling-upgrade compatibility
+    from key_value.shared.utils.managed_entry import ManagedEntry
+    from key_value.shared.utils.serialization import BasicSerializationAdapter
 from typing_extensions import override
 
 log = logging.getLogger("moodle-mcp.oauth-storage")

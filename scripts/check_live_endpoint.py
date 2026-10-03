@@ -7,7 +7,7 @@ import json
 import ssl
 import sys
 from urllib.error import HTTPError
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 
 
@@ -21,13 +21,19 @@ def tls_context() -> ssl.SSLContext:
 
 
 def request(base_url: str, path: str, *, body: bytes | None = None):
+    parsed = urlsplit(base_url)
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username
+            or parsed.password or parsed.query or parsed.fragment):
+        raise ValueError("base URL must be HTTPS without credentials, query, or fragment")
     headers = {"Accept": "application/json, text/event-stream"}
     if body is not None:
         headers["Content-Type"] = "application/json"
     req = Request(urljoin(base_url.rstrip("/") + "/", path.lstrip("/")),
                   data=body, headers=headers, method="POST" if body is not None else "GET")
     try:
-        with urlopen(req, timeout=75, context=tls_context()) as response:
+        # URL is derived from the HTTPS-only base validated above; path is made
+        # relative with lstrip, so urljoin cannot switch to another authority.
+        with urlopen(req, timeout=75, context=tls_context()) as response:  # nosec B310
             return response.status, dict(response.headers), response.read()
     except HTTPError as exc:
         return exc.code, dict(exc.headers), exc.read()
