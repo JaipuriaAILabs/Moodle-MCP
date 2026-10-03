@@ -203,6 +203,16 @@ class Settings(BaseSettings):
     # can never see another's data. Default OFF (students denied entirely) so this sensitive
     # activation is a deliberate env flip (MCP_STUDENT_SELF_ACCESS=true), like the RBAC modes.
     student_self_access: bool = Field(default=False, alias="MCP_STUDENT_SELF_ACCESS")
+    # LLM-blind PII: when on, tool results expose an opaque, deterministic `student_ref`
+    # (HMAC token) for each student instead of the name/enrolment id, plus a stripped
+    # `_identity` side-map, so a model never sees real identity (rehydrated by the harness
+    # outside the model — AIA-1356). Default OFF: the MCP-side tokeniser + resolve_identities
+    # tool ship dormant until the JChat/harness side is wired. Dedicated key, else audit key.
+    pii_tokenize: bool = Field(default=False, alias="MCP_PII_TOKENIZE")
+    pii_hmac_key: str = Field(default="", alias="MCP_PII_HMAC_KEY")
+
+    def pii_key(self) -> str:
+        return self.pii_hmac_key.strip() or self.audit_hmac_key.strip()
 
     def gateway_secrets(self) -> list[str]:
         return [s.strip() for s in self.gateway_shared_secret.split(",") if s.strip()]

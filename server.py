@@ -21,7 +21,8 @@ from security import (HostGuard, SecurityHeaders, TransportGuard, bearer_of,
                       build_middleware, quiet_noisy_loggers, resolve_principal,
                       resolve_oauth_principal)
 from supabase_client import create_service
-from tools import access, actions, analytics, at_risk, insights, reports, students, subjects
+from tools import (access, actions, analytics, at_risk, identity, insights, reports, students,
+                   subjects)
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -204,6 +205,7 @@ at_risk.register(mcp, get_authenticated_service)      # at-risk / attendance wat
 reports.register(mcp, get_authenticated_service)      # generated narrative report (secondary)
 actions.register(mcp, get_authenticated_service)      # create_report (the one write-path tool)
 access.register(mcp, get_authenticated_service)        # self-service RBAC: request_access + queue (admin)
+identity.register(mcp, get_authenticated_service)      # LLM-blind PII: resolve_identities (name/id -> ref)
 
 app = mcp.http_app()
 
