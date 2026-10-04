@@ -443,5 +443,13 @@ def register(mcp, get_service):
         campus, batch = job.get("campus"), job.get("batch")
         if not campus or svc.campus_scope(campus) == []:
             raise PermissionError(MSG_DENIED)
+        # Student self-access: the per-student boundary must hold at THIS (MCP) layer, not only in
+        # the agent. A student may read a job only when its target is their OWN enrolment id — so a
+        # student cannot poll a same-campus peer's request_id even if the agent scoped it by campus.
+        # Fail closed: an absent/foreign target denies. No-op for faculty (self_student_id unset).
+        if getattr(svc, "self_student_id", None):
+            own = getattr(svc, "self_student_ids", None) or [svc.self_student_id]
+            if result.get("student_id") not in own:
+                raise PermissionError(MSG_DENIED)
         return {**_success(result, campus, batch, auto=False),
                 "request_id": params.request_id, "status": "completed"}

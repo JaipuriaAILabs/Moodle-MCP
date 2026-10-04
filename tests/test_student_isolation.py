@@ -3,8 +3,11 @@
 Run: ../moodle-agent/.venv/bin/python tests/test_student_isolation.py
 from the moodle-mcp directory.
 """
+import asyncio
+import json
 import os
 import sys
+import uuid
 from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -45,9 +48,22 @@ class Query:
     def is_(self, *_args, **_kwargs):
         return self
 
+    def or_(self, expr, *_args, **_kwargs):
+        # Model PostgREST or=...ilike.*frag*: keep only rows whose name/id contains a fragment,
+        # applied ON TOP of the eq filters — so apply_student's self bound still holds first and a
+        # classmate name/id can never match the student's own (self-scoped) row set.
+        import re
+        self._or_terms = [f.lower() for f in re.findall(r"ilike\.\*?([^*,]+)\*?", expr) if f]
+        return self
+
     def execute(self):
         rows = [row for row in self.rows
                 if all(row.get(column) == value for column, value in self.filters)]
+        terms = getattr(self, "_or_terms", None)
+        if terms:
+            rows = [r for r in rows if any(
+                t in str(r.get("student_name", "")).lower()
+                or t in str(r.get("student_id", "")).lower() for t in terms)]
         return SimpleNamespace(data=rows, count=len(rows))
 
 
@@ -174,10 +190,97 @@ def test_declining_name_lookup_is_self_only():
     _assert_self_filter(svc, "students")
 
 
+def _two_student_roster():
+    return StudentService({"students": [
+        {"student_id": "SELF", "student_name": "Own Student", "campus": "noida",
+         "batch": "2024-26", "section_group": "A"},
+        {"student_id": "OTHER", "student_name": "Peer Student", "campus": "noida",
+         "batch": "2024-26", "section_group": "A"},
+    ]})
+
+
+def test_get_student_rejects_classmate_lookup():
+    # The headline adversarial case: a student explicitly asks for a classmate — by enrolment id
+    # AND by name — and must get a uniform not-found, never the peer's record.
+    from tools.students import StudentParams
+    for query in ("OTHER", "Peer Student"):
+        svc = _two_student_roster()
+        out = students._student_impl(svc, StudentParams(student_id=query))
+        assert out.get("found") is False, (query, out)
+        blob = json.dumps(out)
+        assert "Peer" not in blob and "OTHER" not in blob, (query, out)
+
+
+def test_student_marks_rejects_classmate_id():
+    from tools.students import StudentParams
+    svc = _two_student_roster()
+    out = students._marks_impl(svc, StudentParams(student_id="OTHER"))
+    assert out.get("found") is False, out
+    assert "OTHER" not in json.dumps(out), out
+
+
+def test_report_job_is_self_only():
+    # get_report_job fetches a queued job by request_id; the MCP layer must additionally confirm the
+    # job's target is the caller's OWN id, so a student cannot poll a same-campus peer's request_id.
+    from tools import actions
+
+    captured = {}
+
+    class _MCP:
+        def tool(self, **_kw):
+            def deco(fn):
+                captured[fn.__name__] = fn
+                return fn
+            return deco
+
+    class _Svc:
+        self_student_id = "SELF"
+        self_student_ids = ["SELF"]
+        principal = {"email": "student@jaipuria.ac.in"}
+
+        def campus_scope(self, campus):
+            return [campus] if campus else []
+
+    svc = _Svc()
+
+    async def _get_service():
+        return svc
+
+    actions.register(_MCP(), _get_service)
+    get_report_job = captured["get_report_job"]
+    original_agent_job = actions._agent_job
+
+    def _stub_job(target_id):
+        async def _aj(_request_id, _principal):
+            return {"status": "completed", "campus": "noida", "batch": "2024-26",
+                    "result": {"student_id": target_id, "name": f"Report {target_id}"}}
+        return _aj
+
+    try:
+        # The student's OWN completed job -> returned.
+        actions._agent_job = _stub_job("SELF")
+        out = asyncio.run(get_report_job(actions.ReportJobParams(request_id=str(uuid.uuid4()))))
+        assert out.get("found") and out.get("student_id") == "SELF", out
+
+        # A same-campus PEER's job, polled by its request_id -> denied at the MCP boundary.
+        actions._agent_job = _stub_job("OTHER")
+        denied = False
+        try:
+            asyncio.run(get_report_job(actions.ReportJobParams(request_id=str(uuid.uuid4()))))
+        except PermissionError:
+            denied = True
+        assert denied, "a student must not read a peer's report job"
+    finally:
+        actions._agent_job = original_agent_job
+
+
 if __name__ == "__main__":
     tests = [test_roster_is_self_only, test_subject_enrolment_counts_are_self_only,
              test_availability_roster_count_is_self_only,
-             test_declining_name_lookup_is_self_only]
+             test_declining_name_lookup_is_self_only,
+             test_get_student_rejects_classmate_lookup,
+             test_student_marks_rejects_classmate_id,
+             test_report_job_is_self_only]
     for test in tests:
         test()
         print(f"  ✓ {test.__name__}")
