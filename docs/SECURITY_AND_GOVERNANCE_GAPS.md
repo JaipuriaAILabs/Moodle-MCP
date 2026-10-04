@@ -62,17 +62,17 @@ ramp:** (G4) observability on, (G5) Redis before >1 instance.
 | G8 | Cohort tools load up to 100k rows into memory to aggregate → concurrent-call **memory-DoS** on a small instance. | LLM06 | Push aggregation into a Postgres RPC/rollup, or count-guard + concurrency cap. Bigger refactor. |
 | G9 | `MCP_TRUST_PROXY_HEADERS` and `MCP_REQUIRE_AUDIT` both **default false**; env drift silently weakens IP attribution / reverts audit to fail-open. | — | Add boot-time assertions (prod must have both true). |
 | G10 | `_source_ip` always takes rightmost XFF regardless of the trust-proxy flag. | — | Gate on `trust_proxy_headers`. Harmless under Render's single proxy. |
-| G11 | Faculty/student email lookups use `.ilike` (treats `%`/`_` as wildcards). | — | Exact-match (`.eq` lower-cased). Near-zero risk (OAuth-verified emails). |
+| G11 | Faculty/student email lookups used `.ilike` (treats `%`/`_` as wildcards → a signed-in email with `_`/`%` could mis-resolve to another student's row = cross-student self-scope). | LLM03 | **FIXED** — escape LIKE wildcards in the signed-in value (`_ilike_literal`). Kept `ilike` (case-insensitivity is load-bearing: 1697/3145 stored emails are mixed-case, so `.eq` would wrongly deny them); 0 stored emails contain wildcards. |
 | G12 | `report_rows`/`one_report` select `*` (pulls `student_email`); output rebuilt from a whitelist so no current leak. | LLM02 | Explicit columns and/or `strip_secrets` on report outputs (defense-in-depth). |
 | G13 | Agent `narrative`/`subject_table` passed through unbounded. | LLM10/06 | Low (single-student). Add a byte cap. |
 | G14 | Crypto-key entropy not enforced. | — | **PARTIAL FIX** — boot now **warns** on <32-char keys (not fail, to avoid bricking a running service). |
 | G15 | Audience guard is defense-in-depth behind the proxy's code-exchange. | LLM08 | Mostly covered — re-synced to flat `aud` + `test_oauth_claims` this session; add a lib-shape regression assert. |
-| G16 | `create_report` `idempotentHint:true` is inaccurate for `refresh`/random-select paths. | — | Set `idempotentHint:false` or document (hosts may over-optimize). |
+| G16 | `create_report` `idempotentHint:true` was inaccurate for `refresh`/random-select paths. | — | **FIXED** — `GENERATE_ANNOTATIONS.idempotentHint=false` so hosts don't dedupe non-idempotent generations. |
 | G17 | `resolve_identities` registered while PII dormant (campus/self-scoped → harmless). | — | Optionally gate registration on `pii.enabled()`. |
 | G18 | Audit partitions end 2027-07-01 (default partition catches overflow). | — | Add a partition-maintenance cron. |
 | G19 | `mcp_audit` **partition** tables have RLS disabled (base tables RLS on; schema GRANT revoked from anon/authenticated → partitions unreachable by app roles). | — | Enable RLS on partitions (defense-in-depth) or rely on the revoke. Low risk. |
 | G20 | `request_access` (~90/min) each fires an approver notification; DB de-dupes the row, not the notifications. | — | De-dupe/rate the notification. Dormant until SMTP set. |
-| G21 | Live cron schedule (retention + health) exists in prod but not committed to repo SQL. | — | Commit the schedule SQL for reproducibility. |
+| G21 | Live cron schedule (retention + health) existed in prod but not committed to repo SQL. | — | **FIXED** — `sql/2026-10-04_cron_schedules.sql` records the idempotent schedule (retention verified live daily 03:00). |
 
 ## OWASP LLM Top 10 (2026) coverage
 | ID | Risk | Status |

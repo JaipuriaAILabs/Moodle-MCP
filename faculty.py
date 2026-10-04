@@ -50,6 +50,14 @@ def _sb():
 
 
 # --- raw fetches (module-level so tests can monkeypatch them) ----------------
+def _ilike_literal(value: str) -> str:
+    """Escape LIKE wildcards so `student_email` is matched LITERALLY (but still case-insensitively,
+    which is load-bearing: >half the roster's stored emails are mixed-case). Without this, a `_` or
+    `%` in a signed-in local-part would act as a wildcard and could resolve a DIFFERENT student's
+    row — handing one student another student's self-scope. No-op for normal emails."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _fetch_faculty_row(email: str):
     rows = (_sb().table("mcp_faculty")
             .select("name,campuses,active,role,can_generate,expires_at")
@@ -59,7 +67,7 @@ def _fetch_faculty_row(email: str):
 
 def _fetch_student_hit(email: str) -> bool:
     rows = (_sb().table("students").select("student_id")
-            .ilike("student_email", email).limit(1).execute()).data
+            .ilike("student_email", _ilike_literal(email)).limit(1).execute()).data
     return bool(rows)
 
 
@@ -68,7 +76,7 @@ def _fetch_student_identity(email: str):
     # (e.g. across programs/campuses), and the email also repeats across run snapshots. Newest
     # batch first, so row[0] is the primary; the caller dedupes by student_id.
     return (_sb().table("students").select("student_id,campus,batch")
-            .ilike("student_email", email).order("batch", desc=True).execute()).data or []
+            .ilike("student_email", _ilike_literal(email)).order("batch", desc=True).execute()).data or []
 
 
 def _copy_ident(d):

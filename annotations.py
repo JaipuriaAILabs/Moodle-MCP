@@ -7,11 +7,13 @@ READONLY_ANNOTATIONS = {
     "openWorldHint": False,
 }
 
-# create_report triggers generation on the report service (writes an insight cache row
-# there; overwrites nothing a caller could lose). Regenerating is safe to repeat.
+# create_report triggers generation on the report service (writes an insight cache row there;
+# overwrites nothing a caller could lose). NOT idempotent, though: refresh=true forces a fresh
+# regeneration + new report_url, and an omitted student_id auto-selects a *random* student — so a
+# repeated call can produce a different target/output. Mark it non-idempotent so hosts don't dedupe.
 GENERATE_ANNOTATIONS = {
     "readOnlyHint": False,
     "destructiveHint": False,
-    "idempotentHint": True,
+    "idempotentHint": False,
     "openWorldHint": False,
 }
