@@ -231,6 +231,20 @@ def _log_shadow(claims: dict, email: str, domain: str) -> dict:
                 "can_generate": False}
 
 
+def _claim_true(value) -> bool:
+    """Whether a Google claim means 'yes'. FastMCP's GoogleProvider populates ``email_verified``
+    from either a bool (OIDC claim / userinfo v2) OR the STRING ``"true"`` (Google's tokeninfo
+    endpoint returns string-encoded values). Accept only unambiguous truthy encodings; everything
+    else — ``False``, ``"false"``, ``None``, ``""``, ``0`` — is a 'no'."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):   # bool is handled above, so this is a genuine int
+        return value == 1
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes")
+    return False
+
+
 def principal_from_claims(claims: dict):
     """Resolve a verified Google identity to a principal (or None = deny), governed by
     MCP_RBAC_MODE. OFF (default): verified Jaipuria accounts get all-campus access, the
@@ -243,20 +257,25 @@ def principal_from_claims(claims: dict):
     email = str(claims.get("email") or "").strip().lower()
     if email.count("@") != 1:
         return None
+    # Email must be verified. FastMCP's GoogleProvider sets `email_verified` from Google's tokeninfo
+    # endpoint, which returns the STRING "true" (not a bool); the userinfo v2 fallback
+    # (`verified_email`) is a real bool. Accept any unambiguous truthy encoding from either source —
+    # anything else stays unverified. (Pre-3.x FastMCP handed us a bool here, hence the old strict
+    # `is True`; 3.4.5 changed the claim shape, which silently rejected every verified sign-in.)
     verified = claims.get("email_verified")
-    if verified is None:  # Google userinfo v2 spells it verified_email
+    if not _claim_true(verified):   # Google userinfo v2 spells it verified_email
         verified = (claims.get("google_user_data") or {}).get("verified_email")
-    # Missing is not verified. Google returns a real bool in either the OIDC claim
-    # or userinfo v2 payload, so require True instead of treating None as success.
-    if verified is not True:
+    if not _claim_true(verified):
+        subject = hashlib.sha256(email.encode()).hexdigest()[:12]
+        log.warning("oauth sign-in rejected: email not verified (subject=%s)", subject)
         return None
-    # Defense-in-depth (confused-deputy / token substitution): when the upstream Google tokeninfo
-    # audience is present in the claims it MUST be our OAuth client — a token minted for a different
-    # Google app (even with the same scopes) is never honored. Absent audience can't be asserted and
-    # is allowed: the OAuthProxy flow already binds the audience by doing the code exchange with our
-    # own credentials, so a legitimate token always carries our client id (or none here).
+    # Defense-in-depth (confused-deputy / token substitution): when the token's Google audience is
+    # present it MUST be our OAuth client — a token minted for a different Google app (even with the
+    # same scopes) is never honored. FastMCP 3.4.5 exposes it as the flat `aud` claim; older builds
+    # nested it under `google_token_info` — check both. Absent audience can't be asserted and is
+    # allowed: the OAuthProxy binds it by doing the code exchange with our own credentials.
     expected_aud = settings.google_oauth_client_id
-    token_aud = (claims.get("google_token_info") or {}).get("audience")
+    token_aud = claims.get("aud") or (claims.get("google_token_info") or {}).get("audience")
     if expected_aud and token_aud and token_aud != expected_aud:
         subject = hashlib.sha256(email.encode()).hexdigest()[:12]
         log.warning("oauth token audience mismatch (subject=%s) — rejecting", subject)
