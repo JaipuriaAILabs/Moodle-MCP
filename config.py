@@ -495,6 +495,23 @@ def validate_config() -> None:
     if settings.require_audit and not settings.audit_enabled():
         raise RuntimeError("MCP_REQUIRE_AUDIT is enabled but SUPABASE_AUDIT_KEY is missing")
 
+    # LLM-blind PII needs its OWN secret: student_ids are low-entropy/enumerable, so sharing the
+    # audit HMAC key would let the audit-writer trust boundary brute-force every student_ref, and
+    # rotating the audit key would silently break harness rehydration. Require a dedicated key when
+    # tokenisation is on (fail boot) rather than silently falling back to MCP_AUDIT_HMAC_KEY.
+    if settings.pii_tokenize and not settings.pii_hmac_key.strip():
+        raise RuntimeError("MCP_PII_TOKENIZE requires a dedicated MCP_PII_HMAC_KEY "
+                           "(it must not fall back to MCP_AUDIT_HMAC_KEY)")
+
+    # Warn — never brick a running service — on low-entropy crypto secrets.
+    for _kname, _kval in (("OAUTH_JWT_SIGNING_KEY", settings.oauth_jwt_signing_key),
+                          ("OAUTH_STORAGE_ENCRYPTION_KEY", settings.oauth_storage_encryption_key),
+                          ("MCP_AUDIT_HMAC_KEY", settings.audit_hmac_key),
+                          ("MCP_PII_HMAC_KEY", settings.pii_hmac_key)):
+        if _kval and len(_kval.strip()) < 32:
+            log.warning("%s is shorter than 32 chars — use a high-entropy (>=32 char) secret",
+                        _kname)
+
     # Fail boot on a partial/plaintext notification configuration.
     webhook_bits = (settings.access_request_webhook_url.strip(),
                     settings.access_request_webhook_secret.strip())

@@ -8,7 +8,12 @@ pydantic-settings>=2.0
 httpx>=0.27
 redis>=5.0,<6
 uvicorn>=0.30
-starlette>=0.37
+# Floor Starlette at 0.40 for CVE-2024-47874 (unbounded multipart/form-data -> memory DoS);
+# fastmcp 3.4.5 pulls it higher in practice, but make the security floor explicit.
+starlette>=0.40
+# cryptography is a FIRST-PARTY import (oauth_storage.py Fernet/MultiFernet token-store
+# encryption), so pin it explicitly instead of inheriting a floating transitive version.
+cryptography>=43
 # OpenTelemetry traces + metrics + logs → New Relic OTLP. Loaded only when
 # NEW_RELIC_LICENSE_KEY is set (telemetry.setup_telemetry); the API is used for
 # instrumentation and no-ops otherwise. The otlp-proto-http exporter package ships the
