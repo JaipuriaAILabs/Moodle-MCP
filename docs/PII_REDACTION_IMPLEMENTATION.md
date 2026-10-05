@@ -50,14 +50,31 @@ and the return. Every registered tool is covered by construction — no per-tool
 canary (no raw identifier survives anywhere, incl. free-text), numeric integrity, determinism,
 `S_`-ref-not-leak-guarded, no `_identity`, shadow vs enforce, mode normaliser, scalar/empty safety.
 
-## Portkey (generation path — NOT this repo)
-The MCP makes no live LLM call, so Portkey has nothing to attach to here. The narrative is generated
-in `moodle-agent` (remote) and in the offline `onepager/build_report.py` (OpenRouter). Portkey PII
-redaction is **one-way/irreversible**, so there it is a *backstop*, not the primary control — the
-primary fix is still generating about `S_…`/"the student" and stitching the real name at render
-(the `create_report` pattern). Portkey guardrail config to attach on the generator's Portkey config:
-`{"before_request_hooks":[{"id":"<pii-pro>"},{"id":"<india-regex>"}],"after_request_hooks":[{"id":"<india-regex>"}]}`
-with Redact ON and action = redact-and-continue (never deny).
+## Portkey (generation path)
+The MCP server makes no live LLM call, so Portkey has nothing to attach to there. The narrative is
+generated in `moodle-agent` (remote) and in the offline `onepager/build_report.py` (OpenRouter).
+Portkey PII redaction is **one-way/irreversible**, so it is a *backstop*; the primary control is
+generating about a token/pseudonym and stitching the real name at render (the `create_report` pattern).
+
+**`onepager/build_report.py` — IMPLEMENTED (flag-gated on `PORTKEY_API_KEY`):**
+- **Step 0:** when `PORTKEY_API_KEY` is set, the call routes through `https://api.portkey.ai/v1`
+  (`@openrouter/<model>`, `x-portkey-api-key`, optional `x-portkey-config`, PII-free metadata). Unset
+  = today's direct-OpenRouter behaviour, unchanged.
+- **Step 4 (token-then-stitch):** the student's real name never enters the prompt — a fixed pseudonym
+  is sent and `stitch_name()` restores the real first name after generation, before the server-side
+  render. The saved `narrative.json` keeps the pseudonym (no real name on disk in Portkey mode).
+- **Guardrails/config (set up in Portkey by the other session):** config **`pc-moodle-cf8b65`** runs
+  four **Regex Replace** guardrails (phone `pg-moodle-fb0470`, aadhaar `pg-moodle-e7cc56`, PAN
+  `pg-moodle-81e6ff`, rollno `pg-moodle-0da71f`) on both prompt and reply, Deny+Async off (redact and
+  continue). **No Pro PII (name) guardrail — it is plan-locked** → token-then-stitch is *mandatory*,
+  not optional. **Verify from the response** (`_log_guardrails` logs hook results + `x-portkey-*`
+  headers): the Portkey Logs UI is over the org's 10k/month quota and is dropping logs.
+- **To check:** the `rollno` regex `\b[A-Z]{2}\d{2}[A-Z]{2}\d{3}\b` was only validated against
+  `JN25MM002` — confirm it against a real enrolment id.
+- Tests: `onepager/test_portkey_redaction.py` (17/0) — routing, no-real-name-in-prompt, stitch.
+
+**`moodle-agent` (remote report backend) — hand-off:** apply the same pattern (route its LLM call
+through Portkey config `pc-moodle-cf8b65`; keep names out of the prompt). Not in a repo available here.
 
 ## Not yet built (Phase 2/3)
 Redis `TokenVault` (not required — `student_ref` is deterministic, the renderer recomputes id→ref),

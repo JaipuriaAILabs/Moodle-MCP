@@ -4,6 +4,10 @@ house-palette colour, mailer wordmark, App Store + Google Play QR codes.
 
 Usage: build_report_v3.py --data data.json --out out_dir [--model google/gemini-2.5-flash-lite] [--no-llm]
 
+PII (DPDP/AIA-1356): set PORTKEY_API_KEY (and optionally PORTKEY_CONFIG_ID=pc-moodle-cf8b65) to route
+the narrative call through Portkey's redaction guardrails AND keep the real name out of the prompt
+(a pseudonym is sent, the real name is stitched back before render). Unset = direct OpenRouter.
+
 data.json: {student:{id,name,campus,batch}, trimester, data_date, benchmark, tracks:[...],
             store:{ios,android}, subjects:[{subject, track, you_pct, class_pct, att_you, att_class,
             components:[{component, kind, you_pct, class_pct}]}]}
@@ -134,6 +138,48 @@ def openrouter_key():
     raise SystemExit("OPENROUTER_API_KEY not found")
 
 
+# ----------------------------------------------------------------- Portkey + token-then-stitch
+# DPDP / AIA-1356: when the narrative LLM call is routed through Portkey (Step 0), the student's
+# real name must never appear in the prompt. Portkey's Pro PII (name) guardrail is plan-locked, so
+# names are NOT caught at the gateway — instead we send a fixed PSEUDONYM to the model and swap the
+# real first name back in after generation, before render (the create_report pattern, generalised).
+# The real name still appears in the RENDERED report (server-side, not an LLM input). Flag-gated on
+# the presence of PORTKEY_API_KEY: unset = today's behaviour (direct OpenRouter, name in prompt).
+PSEUDONYM = "Aarav"   # distinctive, name-shaped placeholder; word-bounded stitch avoids collisions
+
+
+def _portkey_enabled():
+    return bool(os.environ.get("PORTKEY_API_KEY"))
+
+
+def _log_guardrails(headers, data):
+    """Step 5 (quota-safe): the Portkey Logs UI is over the org quota, so verify redaction from the
+    RESPONSE. Log any guardrail/hook results + x-portkey-* headers (verdicts/counts only, no PII)."""
+    try:
+        hooks = data.get("hook_results") or data.get("hook_result")
+        px = {k: v for k, v in headers.items() if k.lower().startswith("x-portkey")}
+        print(f"[portkey] guardrails hooks={json.dumps(hooks) if hooks else None} headers={px or None}",
+              file=sys.stderr)
+    except Exception as e:  # never fail a report over telemetry
+        print(f"[portkey] guardrail log failed: {e}", file=sys.stderr)
+
+
+def stitch_name(n, real_first):
+    """Swap the pseudonym back to the student's real first name across every narrative text field,
+    so the rendered report reads naturally. Word-bounded → 'Aarav' and 'Aarav's' both swap, with no
+    substring hits. No-op when the pseudonym is absent (direct / non-Portkey runs)."""
+    pat = re.compile(rf"\b{re.escape(PSEUDONYM)}\b")
+    swap = lambda s: pat.sub(real_first, s) if isinstance(s, str) else s
+    for k in ("headline", "subtitle", "pattern_title", "pattern_text", "attendance_line"):
+        if k in n:
+            n[k] = swap(n[k])
+    for t in n.get("tracks", []):
+        for k in ("title", "learning", "interview"):
+            if k in t:
+                t[k] = swap(t[k])
+    return n
+
+
 SCHEMA = {
     "type": "object", "additionalProperties": False,
     "required": ["headline", "subtitle", "pattern_title", "pattern_text", "attendance_line", "tracks"],
@@ -147,7 +193,9 @@ SCHEMA = {
 
 
 def llm_narrative(d, f, model, feedback=None):
-    first = d["student"]["name"].split()[0]
+    # Step 4: in Portkey mode the real first name never enters the prompt — the model sees the
+    # pseudonym and stitch_name() restores the real name after generation (see main()).
+    first = PSEUDONYM if _portkey_enabled() else d["student"]["name"].split()[0]
     prompt = f"""You write one-page end-of-trimester reports for MBA students at Jaipuria Institute of Management.
 Audience: the student ({first}), a 22-year-old MBA student in India reading this on a phone. Write like a friendly senior or mentor talking to him, in simple Indian English: short sentences (at most 14 words each), everyday words ("marks", "revise", "class", "quiz", "notes", "faculty"), no metaphors, no jargon, no abstract nouns. If a 15-year-old would not understand a sentence, rewrite it. British/Indian spelling; no em-dashes; no exclamation marks; no praise words ("great", "amazing").
 The trimester is CLOSED: the student cannot re-attempt anything. Every takeaway is something to carry into the next trimester, the specialisation, and placement interviews. Never suggest redoing, resubmitting, retaking or practising the same assessment.
@@ -185,12 +233,30 @@ BANNED anywhere in track text (title, learning, interview): digits, "%", "score"
         body = {"model": model, "temperature": 0.4, "messages": messages}
         if with_schema:
             body["response_format"] = {"type": "json_schema", "json_schema": {"name": "report", "strict": True, "schema": SCHEMA}}
-        req = urllib.request.Request("https://openrouter.ai/api/v1/chat/completions", data=json.dumps(body).encode(),
-                                     headers={"Authorization": f"Bearer {openrouter_key()}", "Content-Type": "application/json",
-                                              "HTTP-Referer": "https://tryrehearsal.ai", "X-Title": "Jaipuria student report"})
-        # Fixed, code-owned HTTPS endpoint above; neither user input nor report data
-        # can alter the scheme or host (reviewed B310 call).
-        return json.load(urllib.request.urlopen(req, timeout=180))  # nosec B310
+        if _portkey_enabled():
+            # Step 0: route through Portkey so the PII-redaction guardrails run. Portkey holds the
+            # OpenRouter key (no Authorization header); the provider is named in the model string.
+            url = "https://api.portkey.ai/v1/chat/completions"
+            body["model"] = model if model.startswith("@") else f"@openrouter/{model}"
+            headers = {"Content-Type": "application/json",
+                       "x-portkey-api-key": os.environ["PORTKEY_API_KEY"],
+                       "x-portkey-metadata": json.dumps({"app": "moodle-mcp-onepager"})}  # never names/emails
+            cfg = os.environ.get("PORTKEY_CONFIG_ID", "").strip()
+            if cfg:
+                headers["x-portkey-config"] = cfg
+        else:
+            url = "https://openrouter.ai/api/v1/chat/completions"
+            headers = {"Authorization": f"Bearer {openrouter_key()}", "Content-Type": "application/json",
+                       "HTTP-Referer": "https://tryrehearsal.ai", "X-Title": "Jaipuria student report"}
+        # Both URLs are fixed, code-owned HTTPS endpoints; neither user input nor report data can
+        # alter the scheme or host (reviewed B310 call).
+        req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
+        with urllib.request.urlopen(req, timeout=180) as resp:  # nosec B310
+            data = json.load(resp)
+            hdrs = dict(resp.headers.items())
+        if _portkey_enabled():
+            _log_guardrails(hdrs, data)
+        return data
 
     # Model-agnostic: prefer structured output, but fall back to the prompt's own JSON
     # contract for providers that reject the response_format parameter or ignore it.
@@ -468,7 +534,9 @@ def main():
             if probs:
                 raise SystemExit(f"narrative failed validation: {probs}")
         n["_model"] = label; n["_cost_usd"] = round(cost, 5)
-        json.dump(n, open(os.path.join(a.out, "narrative.json"), "w"), indent=1)
+        json.dump(n, open(os.path.join(a.out, "narrative.json"), "w"), indent=1)  # saved copy keeps the pseudonym (no real name on disk in Portkey mode)
+    # Step 4: restore the real first name for the server-side render (no-op in direct mode).
+    n = stitch_name(n, d["student"]["name"].split()[0])
     html = render_html(d, f, n, label)
     p = os.path.join(a.out, f"{d['student']['name']} ({d['student']['id']}) - Trimester {d['trimester']}.html")
     open(p, "w").write(html); print(p)
