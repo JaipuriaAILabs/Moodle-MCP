@@ -1,5 +1,17 @@
 # LLM-blind PII — MCP ↔ harness contract (AIA-1386 / AIA-1356)
 
+> **SUPERSEDED for the default rollout (2026-10-05).** This doc describes the `_identity`
+> side-map model, where the MCP emits a reverse map and **trusts the client/harness to strip it**
+> before the model. That trust assumption fails for a non-cooperating MCP client (e.g. a generic
+> host), so the default control is now **in-server redaction** — `pii.redact()` wired at the
+> `GuardMiddleware` chokepoint under `MCP_PII_REDACTION_MODE=off|shadow|enforce`, which emits **no
+> reverse map at all**. See `../../moodle-mcp-pii-redaction-plan.md` §0b and `PII_REDACTION_IMPLEMENTATION.md`.
+> The `student_ref` token is identical in both. **Harness impact (AIA-1356):** the harness no longer
+> needs steps 1 (strip `_identity`) or 4 (rehydrate in the answer) — rehydration moves to the
+> auth-gated server-side report renderer. `resolve_identities` (step 2) and ref→id rewrite on
+> tool-call-in (step 3) remain useful. `tokenise_response`/`_identity` stay in the code for this
+> legacy option but are not the recommended wiring.
+
 The model must never see a student's name or enrolment id; it reasons over opaque **refs**, which the
 harness rehydrates for the authorised human outside the model. The **MCP is the authoritative
 tokeniser** (it has the real values → exact, no NER). This doc is the contract the harness integrates

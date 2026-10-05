@@ -785,6 +785,29 @@ def build_middleware(rate_limit: int, window: float):
                     # (defensive) audit failure can never be re-caught below and reported to
                     # the caller as a tool error. record_tool_call is itself exception-safe.
                     outcome, err = "success", None
+                    # In-server PII redaction (DPDP / AIA-1356): pseudonymise student identities
+                    # BEFORE the result leaves the server or is written to the audit ledger — zero
+                    # trust in the client, no reverse `_identity` map ever emitted. shadow logs the
+                    # coverage it WOULD remove and serves raw; enforce returns the redacted result.
+                    # Fail-open in shadow (never perturb traffic); fail-closed in enforce (a redaction
+                    # bug must deny, not leak). record_tool_call then captures what was actually served.
+                    pii_mode = settings.pii_redaction_mode()
+                    if pii_mode != "off":
+                        try:
+                            import pii as _pii
+                            redacted, _stats = _pii.redact(result)
+                            if pii_mode == "shadow":
+                                if any(_stats.values()):
+                                    log.info("pii.shadow tool=%s ids=%d freetext=%d leak=%d", name,
+                                             _stats["ids"], _stats["freetext"], _stats["leak"])
+                            else:  # enforce
+                                result = redacted
+                        except Exception:  # noqa: BLE001
+                            if pii_mode == "enforce":
+                                log.exception("pii redaction failed for %s — failing closed", name)
+                                outcome, err = "failure", "pii_error"
+                                raise ToolError(MSG_ERROR)
+                            log.warning("pii shadow redaction failed for %s", name, exc_info=True)
                     try:
                         await record_tool_call(tool=name, principal=principal, ok=True,
                                                started=started, headers=headers,

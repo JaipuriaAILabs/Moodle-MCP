@@ -210,9 +210,25 @@ class Settings(BaseSettings):
     # tool ship dormant until the client harness side is wired. Dedicated key, else audit key.
     pii_tokenize: bool = Field(default=False, alias="MCP_PII_TOKENIZE")
     pii_hmac_key: str = Field(default="", alias="MCP_PII_HMAC_KEY")
+    # In-server PII redaction (zero-trust; DPDP). Supersedes the MCP_PII_TOKENIZE harness-rehydration
+    # model: when on, the GuardMiddleware chokepoint pseudonymises every student identity in a tool
+    # result to the deterministic `student_ref` BEFORE it leaves the server, and NO reverse `_identity`
+    # map is ever emitted — so even a non-cooperating client can't hand real names to its model. Names
+    # reappear only in the auth-gated, server-side report renderer. Uses the same dedicated PII key.
+    #   off     : no redaction (current behaviour).
+    #   shadow  : SERVE the raw result unchanged, but compute the redaction and LOG how many
+    #             identifiers / free-text / leak hits it WOULD remove (prefix "pii.shadow"), so
+    #             coverage is validated against real traffic before enforcing.
+    #   enforce : return the redacted result; the client (and any model) sees only refs.
+    pii_redaction_mode_raw: str = Field(default="off", alias="MCP_PII_REDACTION_MODE")
 
     def pii_key(self) -> str:
         return self.pii_hmac_key.strip() or self.audit_hmac_key.strip()
+
+    def pii_redaction_mode(self) -> str:
+        """Normalised in-server PII redaction mode: 'off' | 'shadow' | 'enforce' (bad value -> 'off')."""
+        mode = self.pii_redaction_mode_raw.strip().lower()
+        return mode if mode in ("off", "shadow", "enforce") else "off"
 
     def gateway_secrets(self) -> list[str]:
         return [s.strip() for s in self.gateway_shared_secret.split(",") if s.strip()]
@@ -385,6 +401,10 @@ def validate_config() -> None:
     if settings.rbac_mode_raw.strip().lower() not in ("", "off", "shadow", "enforce"):
         raise RuntimeError("MCP_RBAC_MODE must be one of: off, shadow, enforce")
 
+    # In-server PII redaction mode: a typo must fail loudly, not silently fall back to 'off'.
+    if settings.pii_redaction_mode_raw.strip().lower() not in ("", "off", "shadow", "enforce"):
+        raise RuntimeError("MCP_PII_REDACTION_MODE must be one of: off, shadow, enforce")
+
     # Strict, fail-closed validation of MCP_TOKENS shape.
     if settings.mcp_tokens_raw.strip():
         try:
@@ -501,6 +521,11 @@ def validate_config() -> None:
     # tokenisation is on (fail boot) rather than silently falling back to MCP_AUDIT_HMAC_KEY.
     if settings.pii_tokenize and not settings.pii_hmac_key.strip():
         raise RuntimeError("MCP_PII_TOKENIZE requires a dedicated MCP_PII_HMAC_KEY "
+                           "(it must not fall back to MCP_AUDIT_HMAC_KEY)")
+    # Same reasoning for in-server redaction: enumerable student_ids would be brute-forceable from
+    # the audit key, and the renderer's rehydration is pinned to this key — require a dedicated one.
+    if settings.pii_redaction_mode() != "off" and not settings.pii_hmac_key.strip():
+        raise RuntimeError("MCP_PII_REDACTION_MODE requires a dedicated MCP_PII_HMAC_KEY "
                            "(it must not fall back to MCP_AUDIT_HMAC_KEY)")
 
     # Warn — never brick a running service — on low-entropy crypto secrets.
