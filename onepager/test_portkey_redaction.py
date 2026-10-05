@@ -29,6 +29,8 @@ def check(name, cond):
 os.environ["OPENROUTER_API_KEY"] = "dummy-openrouter-key"   # for the direct-mode path
 import build_report  # noqa: E402
 
+build_report.ENV_FILES = []   # isolate from any real .env / .env.portkey.local during the test
+
 D = {
     "student": {"id": "JN25MM002", "name": "Rahul Sharma", "campus": "noida", "batch": "2025-27"},
     "trimester": 2, "benchmark": "class average", "data_date": "2026-10-01",

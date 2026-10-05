@@ -22,7 +22,11 @@ FONT_DIR = os.path.join(ASSETS, "fonts")
 WORDMARK = os.path.join(ASSETS, "wordmark.png")
 APP_ICON = os.path.join(ASSETS, "app-icon.png")
 JAIPURIA_LOGO = os.path.join(ASSETS, "jaipuria-logo.png")
-ENV_FILES = [os.environ.get("OPENROUTER_ENV", ""), ".env"]
+_REPO_ROOT = os.path.dirname(HERE)
+# Env files scanned for OPENROUTER_API_KEY / PORTKEY_* (os.environ always wins). The repo-root
+# .env.portkey.local (gitignored) carries the Portkey creds for this workflow.
+ENV_FILES = [os.environ.get("OPENROUTER_ENV", ""), ".env",
+             os.path.join(_REPO_ROOT, ".env.portkey.local"), os.path.join(_REPO_ROOT, ".env")]
 
 
 # ----------------------------------------------------------------------------- facts
@@ -127,15 +131,23 @@ def att_direction(pattern):
 
 
 # ----------------------------------------------------------------------------- llm
-def openrouter_key():
-    if os.environ.get("OPENROUTER_API_KEY"):
-        return os.environ["OPENROUTER_API_KEY"]
+def _env(name):
+    """os.environ wins; else the first match in ENV_FILES (KEY=VALUE lines). None if unset."""
+    if os.environ.get(name):
+        return os.environ[name]
     for path in ENV_FILES:
         if path and os.path.exists(path):
             for line in open(path):
-                if line.strip().startswith("OPENROUTER_API_KEY="):
+                if line.strip().startswith(f"{name}="):
                     return line.split("=", 1)[1].strip().strip('"').strip("'")
-    raise SystemExit("OPENROUTER_API_KEY not found")
+    return None
+
+
+def openrouter_key():
+    key = _env("OPENROUTER_API_KEY")
+    if not key:
+        raise SystemExit("OPENROUTER_API_KEY not found")
+    return key
 
 
 # ----------------------------------------------------------------- Portkey + token-then-stitch
@@ -149,7 +161,7 @@ PSEUDONYM = "Aarav"   # distinctive, name-shaped placeholder; word-bounded stitc
 
 
 def _portkey_enabled():
-    return bool(os.environ.get("PORTKEY_API_KEY"))
+    return bool(_env("PORTKEY_API_KEY"))
 
 
 def _log_guardrails(headers, data):
@@ -239,9 +251,9 @@ BANNED anywhere in track text (title, learning, interview): digits, "%", "score"
             url = "https://api.portkey.ai/v1/chat/completions"
             body["model"] = model if model.startswith("@") else f"@openrouter/{model}"
             headers = {"Content-Type": "application/json",
-                       "x-portkey-api-key": os.environ["PORTKEY_API_KEY"],
+                       "x-portkey-api-key": _env("PORTKEY_API_KEY"),
                        "x-portkey-metadata": json.dumps({"app": "moodle-mcp-onepager"})}  # never names/emails
-            cfg = os.environ.get("PORTKEY_CONFIG_ID", "").strip()
+            cfg = (_env("PORTKEY_CONFIG_ID") or "").strip()
             if cfg:
                 headers["x-portkey-config"] = cfg
         else:
