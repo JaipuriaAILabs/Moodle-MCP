@@ -1,0 +1,71 @@
+{
+  // AIA-1391 — Moodle MCP on Cloudflare (Containers path; Rajika's call pending).
+  // Fronts the EXISTING audited Python app (../Dockerfile) with a thin Worker + a single
+  // Durable-Object-backed container instance. See README.md for deploy + secrets.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "jaipuria-os-moodle-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "account_id": "c945945018f732e5607a331ef73c7d75",
+
+  // The container image = the repo-root Dockerfile (python:3.12-slim, uvicorn server:app).
+  // NOTE: that Dockerfile does `COPY . .`, so the build context must be the repo root; the
+  // path below is relative to this file. If CF uses this dir as the context instead, move
+  // wrangler.jsonc to the repo root (see README "Build context"). max_instances=1 because the
+  // app keeps FastMCP sessions + the in-process rate limiter in memory (single-process parity
+  // with Render; OAuth state is already externalised to Supabase).
+  "containers": [
+    {
+      "class_name": "MoodleMcpContainer",
+      "image": "../Dockerfile",
+      "max_instances": 1,
+      "instance_type": "standard" // VERIFY options (dev|basic|standard) + RAM at first deploy
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "MOODLE_MCP_CONTAINER", "class_name": "MoodleMcpContainer" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["MoodleMcpContainer"] }
+  ],
+
+  // Keep the public hostname so no consumer reconfigures. Requires the tryrehearsal.ai zone on
+  // this CF account; if it is not, deploy to the workers.dev route first and CNAME later (README).
+  "routes": [
+    { "pattern": "moodle-mcp.tryrehearsal.ai", "custom_domain": true }
+  ],
+
+  "observability": { "enabled": true },
+
+  // Non-secret config — mirrors the `value:` entries in ../render.yaml. Secrets (the `sync:false`
+  // entries) are NOT here; set them with `wrangler secret put` (see README checklist). The Worker
+  // forwards both vars and secrets into the container's process env (src/index.ts).
+  "vars": {
+    "OAUTH_ALLOW_CROSS_CLIENT_PKCE": "false",
+    "OAUTH_ALLOWED_DOMAINS": "jaipuria.ac.in",
+    "OAUTH_DEFAULT_CAMPUSES": "none",
+    "MCP_SERVER_BASE_URL": "https://moodle-mcp.tryrehearsal.ai",
+    "MCP_ALLOWED_HOSTS": "moodle-mcp.tryrehearsal.ai",
+    "MCP_IP_RATE_LIMIT": "1200",
+    "MCP_RATE_LIMIT_MAX_KEYS": "16384",
+    "MCP_TRUST_PROXY_HEADERS": "true",
+    "MCP_REQUIRE_AUDIT": "true",
+    "MCP_OTEL_ENDPOINT": "https://otlp.eu01.nr-data.net",
+    "MCP_CAPTURE_IDENTITY": "true",
+    "MCP_CAPTURE_ARGUMENTS": "true",
+    "MCP_CAPTURE_RESULTS": "false",
+    "MCP_CAPTURE_CLIENT_IP": "true",
+    "MCP_CAPTURE_ARGS_MAX_BYTES": "32768",
+    "MCP_CAPTURE_RESULT_MAX_BYTES": "262144",
+    "MCP_RBAC_MODE": "off",
+    "MCP_CAMPUSES": "noida,lucknow,jaipur,indore",
+    "MCP_STUDENT_SELF_ACCESS": "false",
+    "MCP_SELF_SERVICE_ACCESS": "true",
+    "AGENT_REPORT_QUEUE": "true",
+    "REPORT_PUBLIC_BASE_URL": "https://reports.tryrehearsal.ai",
+    "MCP_PII_REDACTION_MODE": "off"
+  }
+}
