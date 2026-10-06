@@ -32,10 +32,14 @@
     { "tag": "v1", "new_sqlite_classes": ["MoodleMcpContainer"] }
   ],
 
-  // Keep the public hostname so no consumer reconfigures. Requires the tryrehearsal.ai zone on
-  // this CF account; if it is not, deploy to the workers.dev route first and CNAME later (README).
+  // DOMAIN DECISION (2026-10-06): tryrehearsal.ai stays as-is (its DNS is not ours to move and
+  // reports.tryrehearsal.ai is core infra), so the MCP moves to a subdomain of the ONE zone that IS
+  // in this CF account — rehearsal-os.app. Binding moodle-mcp.rehearsal-os.app is trivial here (the
+  // zone is in-account; the DNS record is auto-created). Consumers re-point to the new host at cutover
+  // (see README / MIGRATION_READINESS.md). The old moodle-mcp.tryrehearsal.ai on Render stays live in
+  // parallel as the rollback until the 7-day window closes.
   "routes": [
-    { "pattern": "moodle-mcp.tryrehearsal.ai", "custom_domain": true }
+    { "pattern": "moodle-mcp.rehearsal-os.app", "custom_domain": true }
   ],
 
   "observability": { "enabled": true },
@@ -47,8 +51,8 @@
     "OAUTH_ALLOW_CROSS_CLIENT_PKCE": "false",
     "OAUTH_ALLOWED_DOMAINS": "jaipuria.ac.in",
     "OAUTH_DEFAULT_CAMPUSES": "none",
-    "MCP_SERVER_BASE_URL": "https://moodle-mcp.tryrehearsal.ai",
-    "MCP_ALLOWED_HOSTS": "moodle-mcp.tryrehearsal.ai",
+    "MCP_SERVER_BASE_URL": "https://moodle-mcp.rehearsal-os.app",
+    "MCP_ALLOWED_HOSTS": "moodle-mcp.rehearsal-os.app",
     "MCP_IP_RATE_LIMIT": "1200",
     "MCP_RATE_LIMIT_MAX_KEYS": "16384",
     "MCP_TRUST_PROXY_HEADERS": "true",

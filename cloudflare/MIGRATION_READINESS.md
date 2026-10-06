@@ -40,10 +40,25 @@ context is correct (`npx wrangler deploy -c cloudflare/wrangler.staging.jsonc`);
 - **jaipuria-os is live here** (router at `rehearsal-os.app` + workshop / custom-gatekeeper / google / mcp /
   scheduler Workers). **No `moodle-mcp` Worker exists yet** → the Moodle MCP is still on Render, as expected.
 
-## ⛔ Blocker 1 — the custom domain `moodle-mcp.tryrehearsal.ai` has no zone here
-The account has **exactly one zone: `rehearsal-os.app`**. There is **no `tryrehearsal.ai` zone**. A Cloudflare
-Worker can only bind a **custom domain whose zone is in the same account**, so the hostname cutover is not
-possible as-is. Three options — **needs a decision + the `tryrehearsal.ai` DNS owner**:
+## ✅ Blocker 1 — RESOLVED (2026-10-06): decision = move the MCP to `moodle-mcp.rehearsal-os.app`
+`tryrehearsal.ai` stays exactly as-is (its DNS is not ours to move and `reports.tryrehearsal.ai` is core
+infra), so rather than touch it, **the MCP's own hostname changes** to a subdomain of the one zone already in
+this CF account: **`moodle-mcp.rehearsal-os.app`** (option 3 below). Binding it is trivial — the zone is
+in-account, so the custom-domain route in `wrangler.jsonc` auto-creates the DNS record on deploy. No
+nameserver move, no Cloudflare-for-SaaS, no change to `tryrehearsal.ai`. `wrangler.jsonc` is updated
+accordingly (`routes` + `MCP_SERVER_BASE_URL` + `MCP_ALLOWED_HOSTS`).
+
+**Cutover steps this creates (deliberate, post-merge):**
+1. **Google OAuth redirect URI** — add the new host's callback to the OAuth client
+   (`982839297774-…apps.googleusercontent.com`) in Google Cloud Console, else sign-in fails on the new host.
+   *(Owner step — needs the Google Cloud project.)*
+2. **Deploy prod** `wrangler.jsonc` → binds `moodle-mcp.rehearsal-os.app` (runs in parallel with Render).
+3. **Re-point consumers** to the new URL: jaipuria-os known-server entry
+   (`packages/gatekeeper-mcp/src/known-servers.ts`), the claude.ai connectors, any other clients.
+4. **Verify** the 3 consumers on the new host → **7-day rollback window** (old `moodle-mcp.tryrehearsal.ai`
+   on Render stays live as the fallback) → **then remove Render**.
+
+Original options (for the record — option 3 chosen):
 
 1. **Add `tryrehearsal.ai` to this CF account.** Requires moving the **whole domain's nameservers** to
    Cloudflare — which also carries **`reports.tryrehearsal.ai` (the live reports backend / core infra)**.
