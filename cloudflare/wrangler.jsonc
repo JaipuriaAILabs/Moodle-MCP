@@ -19,7 +19,7 @@
       "class_name": "MoodleMcpContainer",
       "image": "../Dockerfile",
       "max_instances": 1,
-      "instance_type": "standard" // VERIFY options (dev|basic|standard) + RAM at first deploy
+      "instance_type": "standard-1"
     }
   ],
 

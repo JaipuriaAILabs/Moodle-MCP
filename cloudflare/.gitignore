@@ -1,0 +1,6 @@
+# Wrangler/Node build artefacts — never commit these.
+node_modules/
+.wrangler/
+# Local, per-developer secrets (secrets live in `wrangler secret put`, not git).
+.dev.vars
+.dev.vars.*
