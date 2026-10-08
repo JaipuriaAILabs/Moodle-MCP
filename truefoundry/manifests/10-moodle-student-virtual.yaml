@@ -1,0 +1,35 @@
+{
+  "type": "mcp-server/virtual",
+  "name": "jaipuria-moodle-student",
+  "display_name": "Jaipuria Moodle — student self-service",
+  "description": "Curated self-service surface. The source MCP independently enforces the signed-in student's own enrolment IDs, campus and batch.",
+  "best_effort_mode": false,
+  "servers": [
+    {
+      "name": "jaipuria-moodle-prod",
+      "enabled_tools": [
+        "whoami",
+        "get_student",
+        "student_marks",
+        "student_attendance",
+        "student_trajectory",
+        "student_360",
+        "get_student_report",
+        "create_report",
+        "get_report_job",
+        "resolve_identities"
+      ]
+    }
+  ],
+  "collaborators": [
+    {
+      "subject": "team:everyone",
+      "role_id": "mcp-server-user"
+    }
+  ],
+  "tags": {
+    "application": "moodle-mcp",
+    "persona": "student",
+    "data_class": "restricted-academic"
+  }
+}

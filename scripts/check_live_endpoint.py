@@ -25,7 +25,13 @@ def request(base_url: str, path: str, *, body: bytes | None = None):
     if (parsed.scheme != "https" or not parsed.hostname or parsed.username
             or parsed.password or parsed.query or parsed.fragment):
         raise ValueError("base URL must be HTTPS without credentials, query, or fragment")
-    headers = {"Accept": "application/json, text/event-stream"}
+    # Cloudflare rejects urllib's default Python-urllib signature (error 1010).
+    # Use an explicit, identifiable release-smoke agent so this read-only check
+    # exercises the same public edge that production MCP clients use.
+    headers = {
+        "Accept": "application/json, text/event-stream",
+        "User-Agent": "Moodle-MCP-release-smoke/1.0",
+    }
     if body is not None:
         headers["Content-Type"] = "application/json"
     req = Request(urljoin(base_url.rstrip("/") + "/", path.lstrip("/")),
@@ -86,7 +92,10 @@ def main() -> int:
     challenge = next((value for key, value in mcp_headers.items()
                       if key.lower() == "www-authenticate"), "")
     assert "Bearer" in challenge and "resource_metadata=" in challenge
-    assert json_body(mcp_raw, "MCP auth challenge").get("error") == "invalid_token"
+    # RFC 6750 permits a 401 challenge with an empty body. Some ASGI stacks
+    # return a JSON error instead, so validate it when it is present.
+    if mcp_raw:
+        assert json_body(mcp_raw, "MCP auth challenge").get("error") == "invalid_token"
 
     print(f"Live MCP smoke passed: {base_url.rstrip('/')}")
     return 0

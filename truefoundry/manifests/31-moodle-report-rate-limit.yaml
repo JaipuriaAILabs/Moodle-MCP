@@ -1,0 +1,17 @@
+{
+  "type": "tenant-rate-limit-config/mcp",
+  "name": "jaipuria-moodle-report-cap",
+  "when": {
+    "mcp_servers": {
+      "in": ["jaipuria-moodle-prod:create_report"]
+    }
+  },
+  "limits": {
+    "tool_calls_per_hour": 60
+  },
+  "applies_to": {
+    "type": "per-user"
+  },
+  "mode": "enforce",
+  "log_request_body_on_block": false
+}

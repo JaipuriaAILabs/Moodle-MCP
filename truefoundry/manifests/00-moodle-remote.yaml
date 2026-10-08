@@ -1,0 +1,63 @@
+{
+  "type": "mcp-server/remote",
+  "name": "jaipuria-moodle-prod",
+  "display_name": "Jaipuria Moodle (production source)",
+  "description": "Authoritative Jaipuria Moodle MCP. End users connect through the curated student or staff virtual servers; application RBAC remains the row-level authority.",
+  "url": "https://moodle-mcp.rehearsal-os.app/mcp",
+  "tls_settings": {
+    "reject_unauthorized": true
+  },
+  "tool_policy": {
+    "enable_tools_by_default": false,
+    "enabled_tools": [
+      "whoami",
+      "list_students",
+      "get_student",
+      "student_marks",
+      "student_attendance",
+      "list_subjects",
+      "subject_performance",
+      "section_compare",
+      "assessment_breakdown",
+      "subject_difficulty",
+      "campus_performance_report",
+      "declining_students",
+      "student_trajectory",
+      "student_360",
+      "cohort_pulse",
+      "watchlist",
+      "marks_overview",
+      "attendance_overview",
+      "top_performers",
+      "cohort_compare",
+      "at_risk_students",
+      "attendance_watch",
+      "zero_alerts",
+      "get_student_report",
+      "report_data_availability",
+      "create_report",
+      "get_report_job",
+      "resolve_identities"
+    ]
+  },
+  "auth_data": {
+    "type": "oauth2",
+    "grant_type": "authorization_code",
+    "authorization_url": "https://moodle-mcp.rehearsal-os.app/authorize",
+    "token_url": "https://moodle-mcp.rehearsal-os.app/token",
+    "registration_url": "https://moodle-mcp.rehearsal-os.app/register",
+    "jwt_source": "access_token",
+    "code_challenge_methods_supported": ["S256"],
+    "scopes": [
+      "openid",
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile"
+    ]
+  },
+  "tags": {
+    "application": "moodle-mcp",
+    "environment": "production",
+    "data_class": "restricted-academic",
+    "owner": "jaipuria-ai-labs"
+  }
+}

@@ -4,9 +4,10 @@ A **Jaipuria Google-account-accessible Model Context Protocol (MCP) server** tha
 `student-report-system` data queryable in plain language. Connect it to any MCP host (a dashboard,
 Codex, ChatGPT, Claude.ai, Claude CLI) and ask about student marks, attendance, subjects, cohort
 analytics, longitudinal trends, at-risk students, and report accuracy — every ingested student.
-Every verified `@jaipuria.ac.in` account can use the MCP across all campuses.
+Students are restricted to their own enrolment record. Staff access is whitelist-only: eight named
+users have cross-campus data access and the four campus deans are restricted to their own campus.
 
-**Endpoint:** `https://moodle-mcp.tryrehearsal.ai/mcp` · **Health:** `/health` · **Source tools:** 27
+**Endpoint:** `https://moodle-mcp.rehearsal-os.app/mcp` · **Health:** `/health` · **Source tools:** 30
 **Repo:** `github.com/mansigambhir-1313/Moodle-MCP` · **Owner:** Jaipuria AI Labs
 
 ---
@@ -15,8 +16,8 @@ Every verified `@jaipuria.ac.in` account can use the MCP across all campuses.
 
 The pipeline in [`moodle-agent`](../moodle-agent) ingests Moodle data, computes analytics, and
 generates validated student reports into a Supabase project. This MCP is the **read side** of that
-project for Jaipuria account holders: it exposes the raw data and the pipeline's outputs as
-26 structured query/status tools plus one report-generation action that a host LLM routes on.
+project for authorized Jaipuria account holders: it exposes the raw data and the pipeline's outputs
+as 30 identity, access, query, status and report-generation tools that a host LLM routes on.
 
 It is **data-first** — the primary surface is the raw gradebook and attendance (queryable for
 *every* student, report or not); the generated reports and their two-scheme accuracy scores are a
@@ -25,8 +26,8 @@ generation to the authenticated agent service. This MCP never ingests or emails.
 
 Design lineage: the [Rehearsal MCP](https://github.com/JaipuriaAILabs/rehearsal-mcp) patterns
 (bounded caches, routing-contract docstrings, response budgets, secret stripping, graceful
-degradation), adapted from that server's per-student RLS model to institutional
-data access with Google sign-in granting Jaipuria IDs all campuses.
+degradation), adapted from that server's per-student RLS model to student self-access plus explicit
+campus and cross-campus staff grants.
 
 ### Where it fits
 
@@ -51,7 +52,7 @@ data access with Google sign-in granting Jaipuria IDs all campuses.
 
 ---
 
-## Tools (27)
+## Tools (30)
 
 Every data tool is `SELECT`-only, campus-scoped to the caller, bounded, and carries a
 `WHAT / USE WHEN / DO NOT USE / RETURNS` routing docstring. `create_report` is separately marked
@@ -106,7 +107,18 @@ as a non-destructive write action.
 ### Action (write)
 | Tool | What it does |
 |---|---|
-| `create_report` | Queues one idempotent report job; returns a request id for `get_report_job` |
+| `create_report` | Queues one non-destructive report job; returns a request id for `get_report_job` |
+
+### Identity and access
+| Tool | What it does |
+|---|---|
+| `resolve_identities` | Resolves names/IDs inside the caller's existing data scope |
+| `request_access` | Files a request only when self-service access is enabled (off in production) |
+| `list_access_requests` | Lists the access queue for registry administrators only |
+
+The production TrueFoundry Gateway hides both access-administration tools and exposes separate
+student and authorized-staff Virtual MCP Servers. See
+[`docs/TRUEFOUNDRY_MCP_GATEWAY.md`](docs/TRUEFOUNDRY_MCP_GATEWAY.md).
 
 See [`docs/INNOVATION_ROADMAP.md`](docs/INNOVATION_ROADMAP.md) for Phase-3 ideas
 (`attendance_eligibility`, `attendance_marks_link`, `anomalies`, `roster_health`).
@@ -133,7 +145,7 @@ review.
 
 ### Connect a static-token host (legacy/non-OAuth deployment)
 ```bash
-claude mcp add moodle --transport http https://moodle-mcp.tryrehearsal.ai/mcp \
+claude mcp add moodle --transport http https://moodle-mcp.rehearsal-os.app/mcp \
   --header "Authorization: Bearer <your MCP_TOKENS value>"
 ```
 Then ask, in plain language:
@@ -263,7 +275,7 @@ rollups). Cohort tools page past PostgREST's 1000-row cap and cache the result f
 
 | Environment | URL | Notes |
 |---|---|---|
-| Production | `https://moodle-mcp.tryrehearsal.ai` | Custom domain; `main` auto-deploys |
+| Production | `https://moodle-mcp.rehearsal-os.app` | Cloudflare deployment; `main` auto-deploys |
 | Local | `http://localhost:8899` | `uvicorn server:app --port 8899` |
 
 Full test/deploy steps: [`DEPLOY.md`](DEPLOY.md).
