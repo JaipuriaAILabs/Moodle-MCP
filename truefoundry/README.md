@@ -8,6 +8,8 @@ This directory contains the production gateway configuration for Moodle MCP.
   guardrail and bind to `jaipuria-moodle-prod`.
 - `../scripts/validate_truefoundry_gateway.py` proves the manifests remain aligned with the source
   tool inventory, student allowlist and approved staff roster.
+- `manifests/40-gateway-data-access.yaml` removes the default teammate-trace exposure: people can
+  inspect their own traces and shared aggregate metrics, while full trace access stays admin-only.
 
 Preview before changing the tenant:
 

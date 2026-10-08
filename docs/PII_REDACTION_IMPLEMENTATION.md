@@ -70,5 +70,6 @@ mutation plus Secrets Detection to MCP post-tool results. Add Prompt Injection t
 Cedar/OPA authorization to MCP pre-tool as defence in depth. The full resource inventory, rollout and
 acceptance gates are in `PII_PRODUCTION_HARDENING_PLAN.md`.
 
-The older Portkey/offline one-pager path remains a reference and rollback artifact; it is not the
-production `create_report` execution path and must not be treated as the production PII boundary.
+The standalone one-pager follows the same TrueFoundry-only production contract. It may call a direct
+provider only in development; `ENVIRONMENT=production` or `TRUEFOUNDRY_REQUIRED=1` makes missing
+gateway credentials or required guardrails a hard failure.

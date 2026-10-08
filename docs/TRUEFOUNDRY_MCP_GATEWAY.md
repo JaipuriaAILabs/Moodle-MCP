@@ -1,5 +1,10 @@
 # TrueFoundry MCP Gateway production rollout
 
+This runbook implements the AIA-1012 decision in
+[`AIA_1012_TRUEFOUNDRY_ARCHITECTURE.md`](AIA_1012_TRUEFOUNDRY_ARCHITECTURE.md). Jaipuria OS remains
+the harness; TrueFoundry replaces both the proposed custom gateway and any legacy model-gateway
+path.
+
 ## Security outcome
 
 TrueFoundry becomes the only supported discovery and policy ingress for Moodle MCP, but it does not
@@ -23,6 +28,7 @@ represents the human who initiated the call.
 | Partial-backend behavior | Best Effort disabled on both virtual servers |
 | Per-user MCP rate limit | 90 calls/minute and 2,000/hour, enforced without body logging |
 | Report cost limit | 60 `create_report` calls/hour/user, matching the source service cap |
+| Trace/data visibility | own traces; team aggregate metrics; tenant-admin investigation access |
 | Cedar pre-tool policy | default-deny student/staff tool matrix |
 | Drift test | manifest inventory, OAuth, collaborators, limits and Cedar coverage |
 
@@ -82,6 +88,12 @@ from the staff server's Tools tab before saving the approval policy.
   server/tool, result class, guardrail verdict, latency and rate-limit metadata.
 - Restrict trace/data access to the privacy and platform teams. Export operational OpenTelemetry
   metrics to New Relic without prompt, result or detector-evidence bodies.
+- Export traces and metrics as separate OpenTelemetry signals so either can be disabled without
+  changing the other. The destination and auth header are tenant secrets and are not committed.
+- Use TrueFoundry data routing only after the privacy owner approves the storage region, retention
+  and metadata conditions. Do not route request or response bodies.
+- Preserve `x-tfy-feedback-target-id` for approved QA ratings without copying report contents into a
+  second review store.
 - Alert on authentication failures, Cedar denials, PII/secret blocks, tool error rate, p95 latency,
   report queue latency and rate-limit utilization.
 - Keep exact and semantic response caching off for student data. Cross-user academic-response caches
@@ -98,6 +110,7 @@ from the staff server's Tools tab before saving the approval policy.
 - **OpenAPI-to-MCP for the report API:** would create a parallel path around the audited MCP RBAC and
   HMAC report-job contract.
 - **Semantic caching:** can return one student's output for a merely similar prompt.
+- **Exact gateway caching:** duplicates the identity-scoped application cache in a wider boundary.
 - **Remote Agent / Agent API migration:** the current report service is not an A2A agent. Registration
   before protocol support would advertise a capability that does not exist.
 

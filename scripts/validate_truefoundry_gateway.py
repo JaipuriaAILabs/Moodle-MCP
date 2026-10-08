@@ -131,6 +131,22 @@ def validate() -> None:
     assert report_limit["applies_to"]["type"] == "per-user"
     assert report_limit["log_request_body_on_block"] is False
 
+    data_access = _load("40-gateway-data-access.yaml")
+    assert data_access["type"] == "gateway-data-access-config"
+    rules = {rule["id"]: rule for rule in data_access["rules"]}
+    own = rules["default-everyone-own-data"]
+    assert own["subjects"] == ["team:everyone"]
+    assert set(own["data_types"]) == {"traces", "metrics"}
+    assert own["scope"] == "own_data" and own["enabled"] is True
+    team = rules["default-everyone-team-data"]
+    assert team["subjects"] == ["team:everyone"]
+    assert team["data_types"] == ["metrics"]
+    assert team["scope"] == "team_virtual_account_data" and team["enabled"] is True
+    admin = rules["jaipuria-tenant-admin-all-data"]
+    assert admin["subjects"] == ["role:tenant-admin"]
+    assert set(admin["data_types"]) == {"traces", "metrics"}
+    assert admin["scope"] == "all_data" and admin["enabled"] is True
+
     policy = POLICY.read_text(encoding="utf-8")
     assert 'resource == MCPServer::"jaipuria-moodle-prod"' in policy
     for email in APPROVED_STAFF:

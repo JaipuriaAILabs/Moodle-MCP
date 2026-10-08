@@ -4,9 +4,9 @@ house-palette colour, mailer wordmark, App Store + Google Play QR codes.
 
 Usage: build_report_v3.py --data data.json --out out_dir [--model google/gemini-2.5-flash-lite] [--no-llm]
 
-PII (DPDP/AIA-1356): set PORTKEY_API_KEY (and optionally PORTKEY_CONFIG_ID=pc-moodle-cf8b65) to route
-the narrative call through Portkey's redaction guardrails AND keep the real name out of the prompt
-(a pseudonym is sent, the real name is stitched back before render). Unset = direct OpenRouter.
+PII (DPDP/AIA-1356): production routes through TrueFoundry with bilateral redaction guardrails.
+The real name is never sent to the model: a pseudonym is sent and the real name is stitched back
+only before the server-side render. Direct OpenRouter is a development-only fallback.
 
 data.json: {student:{id,name,campus,batch}, trimester, data_date, benchmark, tracks:[...],
             store:{ios,android}, subjects:[{subject, track, you_pct, class_pct, att_you, att_class,
@@ -23,11 +23,11 @@ WORDMARK = os.path.join(ASSETS, "wordmark.png")
 APP_ICON = os.path.join(ASSETS, "app-icon.png")
 JAIPURIA_LOGO = os.path.join(ASSETS, "jaipuria-logo.png")
 _REPO_ROOT = os.path.dirname(HERE)
-# Env files scanned for OPENROUTER_API_KEY / PORTKEY_* (os.environ always wins). The repo-root
-# .env.truefoundry.local / .env.portkey.local (both gitignored) carry the gateway creds.
+# Env files scanned for development provider and TrueFoundry settings (os.environ always wins).
+# The repo-root .env.truefoundry.local (gitignored) carries local gateway credentials.
 ENV_FILES = [os.environ.get("OPENROUTER_ENV", ""), ".env",
              os.path.join(_REPO_ROOT, ".env.truefoundry.local"),
-             os.path.join(_REPO_ROOT, ".env.portkey.local"), os.path.join(_REPO_ROOT, ".env")]
+             os.path.join(_REPO_ROOT, ".env")]
 
 
 # ----------------------------------------------------------------------------- facts
@@ -151,7 +151,7 @@ def openrouter_key():
     return key
 
 
-# ----------------------------------------------------- gateway (TrueFoundry / Portkey) + token-then-stitch
+# ----------------------------------------------------- TrueFoundry gateway + token-then-stitch
 # DPDP / AIA-1386 / AIA-1356: the student's real name must never appear in any narrative prompt,
 # including local/direct development runs. The gateway PII guardrail is ONE-WAY
 # (redact only, no reinsertion) and is configured to catch email/phone/gov-IDs, NOT the person name —
@@ -159,16 +159,10 @@ def openrouter_key():
 # in after generation, before render (the create_report pattern, generalised). The real name still
 # appears only in the RENDERED report (server-side, never an LLM input).
 #
-# Two interchangeable gateways, both flag-gated on the presence of their key; TrueFoundry takes
-# precedence when both are set. Neither set permits a pseudonymised local-development call only:
-#   - TrueFoundry AI Gateway (AIA-1386): TRUEFOUNDRY_API_KEY + TRUEFOUNDRY_BASE_URL, guardrail
-#     attached per-request via the X-TFY-GUARDRAILS header (group/config in TRUEFOUNDRY_GUARDRAILS).
-#   - Portkey (AIA-1356): PORTKEY_API_KEY (+ optional PORTKEY_CONFIG_ID).
+# TrueFoundry AI Gateway is the only production model ingress. The request attaches the reviewed
+# guardrail selectors explicitly so a tenant policy-scope mistake cannot silently remove them.
+# Development may use a pseudonymised direct-provider call; production fails closed without TFY.
 PSEUDONYM = "Aarav"   # distinctive, name-shaped placeholder; word-bounded stitch avoids collisions
-
-
-def _portkey_enabled():
-    return bool(_env("PORTKEY_API_KEY"))
 
 
 def _truefoundry_enabled():
@@ -176,26 +170,56 @@ def _truefoundry_enabled():
     return bool(_env("TRUEFOUNDRY_API_KEY") and _env("TRUEFOUNDRY_BASE_URL"))
 
 
-def _gateway_enabled():
-    """Any PII gateway in front of the model → the real name must be kept out of the prompt."""
-    return _truefoundry_enabled() or _portkey_enabled()
+def _truefoundry_required():
+    environment = (_env("ENVIRONMENT") or "development").strip().lower()
+    explicit = (_env("TRUEFOUNDRY_REQUIRED") or "").strip().lower()
+    return environment == "production" or explicit in {"1", "true", "yes", "on"}
 
 
-def _log_guardrails(headers, data):
-    """Log only safe Portkey trace/config identifiers; never provider evidence or payloads."""
+def _require_advanced_guardrails():
+    explicit = (_env("TRUEFOUNDRY_REQUIRE_ADVANCED_GUARDRAILS") or "").strip().lower()
+    return _truefoundry_required() if not explicit else explicit in {"1", "true", "yes", "on"}
+
+
+def _csv_ints(name, default):
     try:
-        safe = {"x-portkey-trace-id", "x-portkey-config", "x-portkey-cache-status"}
-        px = {k: v for k, v in headers.items() if k.lower() in safe}
-        print(f"[portkey] metadata={px or None}", file=sys.stderr)
-    except Exception as e:  # never fail a report over telemetry
-        print(f"[portkey] guardrail log failed: {e}", file=sys.stderr)
+        return [int(value.strip()) for value in (_env(name) or default).split(",") if value.strip()]
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a comma-separated integer list") from exc
+
+
+def _validate_truefoundry():
+    configured = _truefoundry_enabled()
+    if _truefoundry_required() and not configured:
+        raise RuntimeError("TrueFoundry is required but TRUEFOUNDRY_API_KEY/BASE_URL are missing")
+    if not configured:
+        return
+    base_url = _env("TRUEFOUNDRY_BASE_URL") or ""
+    if not base_url.startswith("https://"):
+        raise RuntimeError("TRUEFOUNDRY_BASE_URL must use HTTPS")
+    inputs = (_env("TRUEFOUNDRY_INPUT_GUARDRAILS") or "").strip()
+    outputs = (_env("TRUEFOUNDRY_OUTPUT_GUARDRAILS") or "").strip()
+    if not inputs or not outputs:
+        raise RuntimeError("TrueFoundry PII guardrails are required on input and output")
+    if _require_advanced_guardrails():
+        if not (_env("TRUEFOUNDRY_PROMPT_INJECTION_GUARDRAIL") or "").strip():
+            raise RuntimeError("TrueFoundry Prompt Injection guardrail is required")
+        if not (_env("TRUEFOUNDRY_SECRETS_GUARDRAIL") or "").strip():
+            raise RuntimeError("TrueFoundry Secrets Detection guardrail is required")
+    timeout_ms = int(_env("TRUEFOUNDRY_REQUEST_TIMEOUT_MS") or "60000")
+    attempts = int(_env("TRUEFOUNDRY_RETRY_ATTEMPTS") or "2")
+    if not 1000 <= timeout_ms <= 300000:
+        raise RuntimeError("TRUEFOUNDRY_REQUEST_TIMEOUT_MS must be between 1000 and 300000")
+    if not 0 <= attempts <= 5:
+        raise RuntimeError("TRUEFOUNDRY_RETRY_ATTEMPTS must be between 0 and 5")
 
 
 def _log_tfy(headers, data):
     """Log only safe TrueFoundry trace/routing/timing headers; never guardrail evidence or bodies."""
     try:
         safe = {"x-tfy-trace-id", "x-tfy-resolved-model", "x-tfy-applied-configurations",
-                "x-tfy-applied-rules", "server-timing"}
+                "x-tfy-applied-rules", "x-tfy-cache-status", "x-tfy-feedback-target-id",
+                "server-timing"}
         tf = {k: v for k, v in headers.items() if k.lower() in safe}
         print(f"[truefoundry] metadata={tf or None}", file=sys.stderr)
     except Exception as e:  # never fail a report over telemetry
@@ -205,7 +229,7 @@ def _log_tfy(headers, data):
 def stitch_name(n, real_first):
     """Swap the pseudonym back to the student's real first name across every narrative text field,
     so the rendered report reads naturally. Word-bounded → 'Aarav' and 'Aarav's' both swap, with no
-    substring hits. No-op when the pseudonym is absent (direct / non-Portkey runs)."""
+    substring hits. No-op when the pseudonym is absent."""
     pat = re.compile(rf"\b{re.escape(PSEUDONYM)}\b")
     swap = lambda s: pat.sub(real_first, s) if isinstance(s, str) else s
     for k in ("headline", "subtitle", "pattern_title", "pattern_text", "attendance_line"):
@@ -267,6 +291,7 @@ BANNED anywhere in track text (title, learning, interview): digits, "%", "score"
         messages += [{"role": "assistant", "content": json.dumps(prev)},
                      {"role": "user", "content": "Your draft broke these rules; fix every one and return the full JSON again:\n- " + "\n- ".join(probs)}]
     def _call(with_schema):
+        _validate_truefoundry()
         body = {"model": model, "temperature": 0.4, "stream": False, "messages": messages}
         if with_schema:
             body["response_format"] = {"type": "json_schema", "json_schema": {"name": "report", "strict": True, "schema": SCHEMA}}
@@ -279,9 +304,8 @@ BANNED anywhere in track text (title, learning, interview): digits, "%", "score"
             body["model"] = _env("TRUEFOUNDRY_MODEL") or model   # TFY model id, e.g. "<provider>/<model>"
             headers = {"Content-Type": "application/json",
                        "Authorization": f"Bearer {_env('TRUEFOUNDRY_API_KEY')}"}
-            legacy = (_env("TRUEFOUNDRY_GUARDRAILS") or "moodle-pii/pii-redaction").strip()
-            inputs = [x.strip() for x in (_env("TRUEFOUNDRY_INPUT_GUARDRAILS") or legacy).split(",") if x.strip()]
-            outputs = [x.strip() for x in (_env("TRUEFOUNDRY_OUTPUT_GUARDRAILS") or legacy).split(",") if x.strip()]
+            inputs = [x.strip() for x in (_env("TRUEFOUNDRY_INPUT_GUARDRAILS")).split(",") if x.strip()]
+            outputs = [x.strip() for x in (_env("TRUEFOUNDRY_OUTPUT_GUARDRAILS")).split(",") if x.strip()]
             if _env("TRUEFOUNDRY_PROMPT_INJECTION_GUARDRAIL"):
                 inputs.append(_env("TRUEFOUNDRY_PROMPT_INJECTION_GUARDRAIL"))
             if _env("TRUEFOUNDRY_SECRETS_GUARDRAIL"):
@@ -295,19 +319,18 @@ BANNED anywhere in track text (title, learning, interview): digits, "%", "score"
             headers["X-TFY-METADATA"] = json.dumps({
                 "application": "moodle-mcp-onepager", "feature": "student-report",
                 "data_class": "pseudonymized-academic",
+                "prompt_version": _env("TRUEFOUNDRY_PROMPT_VERSION") or "student-report-system/1.0.0",
             })
             headers["X-TFY-LOGGING-CONFIG"] = json.dumps({"enabled": False})
-        elif _portkey_enabled():
-            # Step 0: route through Portkey so the PII-redaction guardrails run. Portkey holds the
-            # OpenRouter key (no Authorization header); the provider is named in the model string.
-            url = "https://api.portkey.ai/v1/chat/completions"
-            body["model"] = model if model.startswith("@") else f"@openrouter/{model}"
-            headers = {"Content-Type": "application/json",
-                       "x-portkey-api-key": _env("PORTKEY_API_KEY"),
-                       "x-portkey-metadata": json.dumps({"app": "moodle-mcp-onepager"})}  # never names/emails
-            cfg = (_env("PORTKEY_CONFIG_ID") or "").strip()
-            if cfg:
-                headers["x-portkey-config"] = cfg
+            headers["X-TFY-DISABLE-WEB-SEARCH"] = "true"
+            headers["X-TFY-REQUEST-TIMEOUT"] = _env("TRUEFOUNDRY_REQUEST_TIMEOUT_MS") or "60000"
+            headers["X-TFY-RETRY-CONFIG"] = json.dumps({
+                "attempts": int(_env("TRUEFOUNDRY_RETRY_ATTEMPTS") or "2"),
+                "onStatusCodes": _csv_ints(
+                    "TRUEFOUNDRY_RETRY_STATUS_CODES", "408,429,500,502,503,504"),
+                "useRetryAfterHeader": True,
+            })
+            headers["X-TFY-GUARDRAILS-SCOPE"] = "all"
         else:
             url = "https://openrouter.ai/api/v1/chat/completions"
             headers = {"Authorization": f"Bearer {openrouter_key()}", "Content-Type": "application/json",
@@ -320,8 +343,6 @@ BANNED anywhere in track text (title, learning, interview): digits, "%", "score"
             hdrs = dict(resp.headers.items())
         if _truefoundry_enabled():
             _log_tfy(hdrs, data)
-        elif _portkey_enabled():
-            _log_guardrails(hdrs, data)
         return data
 
     # Model-agnostic: prefer structured output, but fall back to the prompt's own JSON
@@ -600,7 +621,7 @@ def main():
             if probs:
                 raise SystemExit(f"narrative failed validation: {probs}")
         n["_model"] = label; n["_cost_usd"] = round(cost, 5)
-        json.dump(n, open(os.path.join(a.out, "narrative.json"), "w"), indent=1)  # saved copy keeps the pseudonym (no real name on disk in Portkey mode)
+        json.dump(n, open(os.path.join(a.out, "narrative.json"), "w"), indent=1)  # saved copy keeps the pseudonym; no real name is persisted
     # Step 4: restore the real first name for the server-side render (no-op in direct mode).
     n = stitch_name(n, d["student"]["name"].split()[0])
     html = render_html(d, f, n, label)

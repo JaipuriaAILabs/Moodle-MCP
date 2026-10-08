@@ -119,6 +119,8 @@ as a non-destructive write action.
 The production TrueFoundry Gateway hides both access-administration tools and exposes separate
 student and authorized-staff Virtual MCP Servers. See
 [`docs/TRUEFOUNDRY_MCP_GATEWAY.md`](docs/TRUEFOUNDRY_MCP_GATEWAY.md).
+The AIA-1012 architecture decision and capability-by-capability disposition are documented in
+[`docs/AIA_1012_TRUEFOUNDRY_ARCHITECTURE.md`](docs/AIA_1012_TRUEFOUNDRY_ARCHITECTURE.md).
 
 See [`docs/INNOVATION_ROADMAP.md`](docs/INNOVATION_ROADMAP.md) for Phase-3 ideas
 (`attendance_eligibility`, `attendance_marks_link`, `anomalies`, `roster_health`).
