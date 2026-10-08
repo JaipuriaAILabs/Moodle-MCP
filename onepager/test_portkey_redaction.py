@@ -99,11 +99,12 @@ check("no-op when pseudonym absent",
 check("word-bounded: does not corrupt other words",
       build_report.stitch_name({"headline": "Aaravind met Aarav."}, "Rahul")["headline"] == "Aaravind met Rahul.")
 
-print("\n[ direct mode (no Portkey): unchanged, real name in prompt ]")
+print("\n[ direct development mode: pseudonym remains mandatory ]")
 del os.environ["PORTKEY_API_KEY"]
 build_report.llm_narrative(D, F, "google/gemini-2.5-flash")
 check("routed to OpenRouter", CAP["url"] == "https://openrouter.ai/api/v1/chat/completions")
-check("real first name present in direct-mode prompt", "Rahul" in CAP["data"])
+check("real first name absent in direct-mode prompt", "Rahul" not in CAP["data"])
+check("pseudonym present in direct-mode prompt", "Aarav" in CAP["data"])
 check("Authorization header present in direct mode", "authorization" in CAP["headers"])
 check("model NOT @openrouter-prefixed in direct mode",
       json.loads(CAP["data"])["model"] == "google/gemini-2.5-flash")

@@ -524,9 +524,13 @@ def validate_config() -> None:
                            "(it must not fall back to MCP_AUDIT_HMAC_KEY)")
     # Same reasoning for in-server redaction: enumerable student_ids would be brute-forceable from
     # the audit key, and the renderer's rehydration is pinned to this key — require a dedicated one.
-    if settings.pii_redaction_mode() != "off" and not settings.pii_hmac_key.strip():
-        raise RuntimeError("MCP_PII_REDACTION_MODE requires a dedicated MCP_PII_HMAC_KEY "
-                           "(it must not fall back to MCP_AUDIT_HMAC_KEY)")
+    if settings.pii_redaction_mode() != "off":
+        if not settings.pii_hmac_key.strip():
+            raise RuntimeError("MCP_PII_REDACTION_MODE requires a dedicated MCP_PII_HMAC_KEY "
+                               "(it must not fall back to MCP_AUDIT_HMAC_KEY)")
+        if len(settings.pii_hmac_key.strip()) < 32:
+            raise RuntimeError("MCP_PII_HMAC_KEY must be at least 32 characters when PII "
+                               "redaction is enabled")
 
     # Warn — never brick a running service — on low-entropy crypto secrets.
     for _kname, _kval in (("OAUTH_JWT_SIGNING_KEY", settings.oauth_jwt_signing_key),

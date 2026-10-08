@@ -62,7 +62,8 @@ def find_student(svc, student_id):
     (campus, batch, student_name) or None. Uses the students table, so it covers EVERY ingested
     student — not only those with a generated report. Always campus-scoped: a name never resolves
     a student outside the caller's grant. When a name/fragment matches several students it raises a
-    ToolError listing the candidates (with ids) so the caller can disambiguate — never guesses."""
+    PII-safe ToolError and asks for stronger user-supplied context — it never guesses or discloses
+    other roster identities through the error channel."""
     query = (student_id or "").strip()
     if not query:
         return None
@@ -104,10 +105,8 @@ def find_student(svc, student_id):
     exact = [r for r in cands if " ".join((r.get("student_name") or "").split()).lower() == norm]
     if len(exact) == 1:
         return exact[0]
-    listing = "; ".join(f"{r.get('student_name')} ({r['student_id']}, {r['campus']}/{r['batch']})"
-                        for r in sorted(cands, key=lambda r: r.get("student_name") or "")[:10])
-    raise ToolError(f"Multiple students match '{query}'. Re-run with the exact enrolment id — "
-                    f"candidates: {listing}")
+    raise ToolError("Multiple students match that lookup. Ask the user for the exact enrolment "
+                    "number, campus, or batch; candidate identities are not exposed in errors.")
 
 
 def roster_member(svc, student_id, campus, batch):

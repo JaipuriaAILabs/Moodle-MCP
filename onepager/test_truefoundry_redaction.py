@@ -93,6 +93,14 @@ check("Authorization: Bearer <tfy key> sent", CAP["headers"].get("authorization"
 gr = json.loads(CAP["headers"].get("x-tfy-guardrails", "{}"))
 check("X-TFY-GUARDRAILS input hook = moodle-pii/pii-redaction",
       gr.get("llm_input_guardrails") == ["moodle-pii/pii-redaction"])
+check("X-TFY-GUARDRAILS output hook = moodle-pii/pii-redaction",
+      gr.get("llm_output_guardrails") == ["moodle-pii/pii-redaction"])
+check("stream=false so output guardrails execute", body.get("stream") is False)
+check("gateway body logging disabled",
+      json.loads(CAP["headers"].get("x-tfy-logging-config", "{}"))["enabled"] is False)
+metadata = json.loads(CAP["headers"].get("x-tfy-metadata", "{}"))
+check("TrueFoundry metadata carries no student identity",
+      not any(x in json.dumps(metadata) for x in ("Rahul", "Sharma", "JN25MM002")))
 
 print("\n[ precedence: TrueFoundry wins when both TFY and Portkey keys are set ]")
 os.environ["PORTKEY_API_KEY"] = "pk-test"
@@ -112,12 +120,13 @@ n = build_report.stitch_name(n, "Rahul")
 check("headline stitched to real name", n["headline"].startswith("Hi Rahul."))
 check("no pseudonym left anywhere", "Aarav" not in json.dumps(n))
 
-print("\n[ direct mode (no gateway): unchanged, real name in prompt ]")
+print("\n[ direct development mode: pseudonym remains mandatory ]")
 for k in ("TRUEFOUNDRY_API_KEY", "TRUEFOUNDRY_BASE_URL", "TRUEFOUNDRY_MODEL"):
     os.environ.pop(k, None)
 build_report.llm_narrative(D, F, "google/gemini-2.5-flash")
 check("routed to OpenRouter", CAP["url"] == "https://openrouter.ai/api/v1/chat/completions")
-check("real first name present in direct-mode prompt", "Rahul" in CAP["data"])
+check("real first name absent in direct-mode prompt", "Rahul" not in CAP["data"])
+check("pseudonym present in direct-mode prompt", "Aarav" in CAP["data"])
 check("no X-TFY-GUARDRAILS header in direct mode", "x-tfy-guardrails" not in CAP["headers"])
 
 print(f"\n{PASS} passed, {FAIL} failed")

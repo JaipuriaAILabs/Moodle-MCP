@@ -93,6 +93,13 @@ services:
         value: "32768"
       - key: MCP_CAPTURE_RESULT_MAX_BYTES
         value: "262144"
+      # Zero-trust PII boundary: FastMCP ToolResult structured/text content is
+      # pseudonymised before it leaves the server or enters the audit result field.
+      # This dedicated key must be stable across deploys; changing it rotates S_* refs.
+      - key: MCP_PII_HMAC_KEY
+        sync: false
+      - key: MCP_PII_REDACTION_MODE
+        value: "enforce"
       # The Supabase mcp_faculty registry is the authoritative whitelist.
       # Unlisted identities are denied and campus_admin grants are single-campus.
       - key: MCP_RBAC_MODE

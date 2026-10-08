@@ -6,13 +6,15 @@ harness feeds only tokens to the model and rehydrates them for the authorised hu
 so the model never sees a real name or enrolment id, but access scope and the human's view are
 unchanged (PII-blindness is orthogonal to authorisation).
 
-This module provides the primitives + a response transform. It is DORMANT until
-`MCP_PII_TOKENIZE=true` AND a key is set; `enabled()` gates callers. The response-path WIRING is
-done together with the harness rollout — these primitives + the resolve_identities tool are the
-contract the harness integrates against. See docs/PII_TOKENIZATION_CONTRACT.md.
+This module contains both the legacy client-harness tokenisation contract and the production
+in-server redactor. The legacy ``tokenise_response`` path is dormant until
+``MCP_PII_TOKENIZE=true``; the zero-trust ``redact`` path is wired independently at
+``GuardMiddleware`` and is mandatory when ``MCP_PII_REDACTION_MODE=enforce``. See
+docs/PII_REDACTION_IMPLEMENTATION.md.
 """
 import hashlib
 import hmac
+import json
 import logging
 import re
 
@@ -25,10 +27,13 @@ _NAME_KEYS = ("student_name", "student_email", "name", "full_name", "first_name"
 
 # Generic PII patterns for the free-text LEAK GUARD (a secondary net over the exact roster-value
 # sweep below). Applied only to string leaf values, after structured tokenisation. Deliberately
-# conservative so marks, enrolment ids, report URLs and our own `S_` refs are never matched:
-# an `S_` ref has no '@' and is not a 10-digit run, so neither pattern touches it.
+# conservative so marks, report URLs and our own `S_` refs are never matched. Institutional
+# enrolment numbers and common Indian government identifiers are explicit leak-guard targets.
 _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 _PHONE_RE = re.compile(r"(?<!\d)(?:\+?91[\s-]?|0)?[6-9]\d{9}(?!\d)")
+_ENROLMENT_RE = re.compile(r"\bJ[A-Z]\d{2}[A-Z]{2,6}\d{3,6}\b", re.IGNORECASE)
+_PAN_RE = re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b", re.IGNORECASE)
+_AADHAAR_RE = re.compile(r"(?<!\d)\d{4}[\s-]?\d{4}[\s-]?\d{4}(?!\d)")
 
 
 def enabled() -> bool:
@@ -157,19 +162,104 @@ def _sweep_strings(obj, name_re, name_lookup, emails, stats):
 
 
 def _leak_guard(obj, stats, redact_hits):
-    """Final net: catch any email/phone still present in a string leaf. Counts always; replaces
-    with [EMAIL]/[PHONE] only when redact_hits is True (enforce). Never touches `S_` refs."""
+    """Final net for PII that can be recognised without a roster identity map. Counts always;
+    replaces only when ``redact_hits`` is true. Never touches opaque ``S_`` references."""
     if isinstance(obj, dict):
         return {k: _leak_guard(v, stats, redact_hits) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_leak_guard(v, stats, redact_hits) for v in obj]
     if isinstance(obj, str):
-        hits = len(_EMAIL_RE.findall(obj)) + len(_PHONE_RE.findall(obj))
-        if hits:
-            stats["leak"] += hits
-            if redact_hits:
-                obj = _PHONE_RE.sub("[PHONE]", _EMAIL_RE.sub("[EMAIL]", obj))
+        patterns = (
+            (_EMAIL_RE, "[EMAIL]"),
+            (_AADHAAR_RE, "[AADHAAR]"),
+            (_PAN_RE, "[PAN]"),
+            (_PHONE_RE, "[PHONE]"),
+            (_ENROLMENT_RE, "[STUDENT_ID]"),
+        )
+        for pattern, replacement in patterns:
+            hits = len(pattern.findall(obj))
+            if hits:
+                stats["leak"] += hits
+                if redact_hits:
+                    obj = pattern.sub(replacement, obj)
         return obj
+    return obj
+
+
+def _model_fields(obj):
+    """Return Pydantic v2 field names without importing FastMCP/MCP model classes here."""
+    fields = getattr(type(obj), "model_fields", None)
+    if isinstance(fields, dict) and callable(getattr(obj, "model_copy", None)):
+        return tuple(fields)
+    return ()
+
+
+def _json_container(value):
+    """Parse JSON text only when it contains an object/array worth traversing."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, (dict, list)) else None
+
+
+def _collect_identities(obj, idmap):
+    """Discover structured identities across dicts and real FastMCP/Pydantic result wrappers."""
+    if isinstance(obj, dict):
+        tokenise(obj, idmap)  # transformed copy is intentionally discarded in this discovery pass
+        for value in obj.values():
+            _collect_identities(value, idmap)
+        return
+    if isinstance(obj, list):
+        tokenise(obj, idmap)
+        for value in obj:
+            _collect_identities(value, idmap)
+        return
+    if isinstance(obj, str):
+        parsed = _json_container(obj)
+        if parsed is not None:
+            tokenise(parsed, idmap)
+        return
+    for field in _model_fields(obj):
+        _collect_identities(getattr(obj, field, None), idmap)
+
+
+def _redact_value(obj, idmap, name_re, name_lookup, emails, stats, redact_hits,
+                  *, already_tokenised=False):
+    """Redact while preserving FastMCP/MCP Pydantic result and content-block types."""
+    if isinstance(obj, dict):
+        transformed = obj if already_tokenised else tokenise(obj, idmap)[0]
+        return {
+            key: _redact_value(value, idmap, name_re, name_lookup, emails, stats, redact_hits,
+                               already_tokenised=True)
+            for key, value in transformed.items()
+        }
+    if isinstance(obj, list):
+        transformed = obj if already_tokenised else tokenise(obj, idmap)[0]
+        return [
+            _redact_value(value, idmap, name_re, name_lookup, emails, stats, redact_hits,
+                          already_tokenised=True)
+            for value in transformed
+        ]
+    if isinstance(obj, str):
+        parsed = _json_container(obj)
+        if parsed is not None:
+            transformed, _ = tokenise(parsed, idmap)
+            transformed = _sweep_strings(transformed, name_re, name_lookup, emails, stats)
+            transformed = _leak_guard(transformed, stats, redact_hits)
+            return json.dumps(transformed, ensure_ascii=False, separators=(",", ":"))
+        transformed = _sweep_strings(obj, name_re, name_lookup, emails, stats)
+        return _leak_guard(transformed, stats, redact_hits)
+    fields = _model_fields(obj)
+    if fields:
+        updates = {
+            field: _redact_value(getattr(obj, field, None), idmap, name_re, name_lookup,
+                                 emails, stats, redact_hits)
+            for field in fields
+        }
+        return obj.model_copy(update=updates, deep=True)
     return obj
 
 
@@ -181,12 +271,9 @@ def redact(result, *, redact_hits: bool = True):
     untouched and the same student is always the same ref. `redact_hits=False` still counts leak-guard
     hits but leaves them in place (used by shadow callers that only want the stats)."""
     stats = {"ids": 0, "freetext": 0, "leak": 0}
-    if not isinstance(result, (dict, list)):
-        return _leak_guard(result, stats, redact_hits), stats
-    transformed, idmap = tokenise(result)
+    idmap = {}
+    _collect_identities(result, idmap)
     stats["ids"] = len(idmap)
-    if idmap:
-        name_re, name_lookup, emails = _identity_sweepers(idmap)
-        transformed = _sweep_strings(transformed, name_re, name_lookup, emails, stats)
-    transformed = _leak_guard(transformed, stats, redact_hits)
+    name_re, name_lookup, emails = _identity_sweepers(idmap)
+    transformed = _redact_value(result, idmap, name_re, name_lookup, emails, stats, redact_hits)
     return transformed, stats

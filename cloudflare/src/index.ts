@@ -53,7 +53,7 @@ export class MoodleMcpContainer extends Container<Env> {
   // criterion. Pair with a keepalive cron hitting /health (see README) for a hard guarantee.
   sleepAfter = "6h";
 
-  constructor(ctx: DurableObjectState, env: Env) {
+  constructor(ctx: DurableObjectState<{}>, env: Env) {
     super(ctx, env);
     const vars: Record<string, string> = {};
     for (const k of CONTAINER_ENV_KEYS) {
