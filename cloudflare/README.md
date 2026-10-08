@@ -26,7 +26,7 @@ Worker + a single container instance — **zero rewrite** of the OAuth / RBAC / 
   so per-user IP capture + per-IP flood limits keep working.
 - **Warm start** for the `<2s` cold-`initialize` criterion: long `sleepAfter` + a keepalive cron on
   `/health` (reuse the existing 10-min health cron pattern).
-- **Issuer**: `MCP_SERVER_BASE_URL=https://moodle-mcp.tryrehearsal.ai` (no trailing slash) is a `var`;
+- **Issuer**: `MCP_SERVER_BASE_URL=https://moodle-mcp.rehearsal-os.app` (no trailing slash) is a `var`;
   the app's `config.py` validator already strips a stray slash, so the `.issuer` acceptance check passes.
 
 ## Build context
@@ -92,10 +92,10 @@ Then cut over:
 
 ## Acceptance checks (AIA-1391)
 ```sh
-curl -sI https://moodle-mcp.tryrehearsal.ai/mcp | grep -i cf-ray            # served by the Worker
-curl -s https://moodle-mcp.tryrehearsal.ai/.well-known/oauth-authorization-server \
-  | jq .issuer                                                               # == "https://moodle-mcp.tryrehearsal.ai"
-# cold initialize < 2s; all 3 consumers connect with NO config change on their side
+curl -sI https://moodle-mcp.rehearsal-os.app/mcp | grep -i cf-ray           # served by the Worker
+curl -s https://moodle-mcp.rehearsal-os.app/.well-known/oauth-authorization-server \
+  | jq .issuer                                                               # == "https://moodle-mcp.rehearsal-os.app"
+# cold initialize < 2s; all 3 consumers connect AFTER re-pointing to the new host (hostname changed)
 ```
 
 ## Still to confirm with Rajika

@@ -1,0 +1,59 @@
+{
+  // AIA-1391 STAGING deploy — workers.dev only, NO custom domain (tryrehearsal.ai is not a zone in
+  // this account). Deploys the Moodle MCP container to
+  // https://jaipuria-os-moodle-mcp.ailabs-c94.workers.dev — touches nothing live on Render.
+  // Deploy from the REPO ROOT so the Dockerfile's `COPY . .` build context is correct:
+  //   cd moodle-mcp && pnpm dlx wrangler deploy -c cloudflare/wrangler.staging.jsonc
+  // (or:  wrangler deploy -c cloudflare/wrangler.staging.jsonc  if wrangler is global)
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "jaipuria-os-moodle-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "account_id": "c945945018f732e5607a331ef73c7d75",
+  "workers_dev": true,
+
+  "containers": [
+    {
+      "class_name": "MoodleMcpContainer",
+      "image": "../Dockerfile",
+      "max_instances": 1,
+      "instance_type": "standard-1"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "MOODLE_MCP_CONTAINER", "class_name": "MoodleMcpContainer" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["MoodleMcpContainer"] }
+  ],
+
+  "observability": { "enabled": true },
+
+  // Non-secret config for STAGING. Note the base URL / allowed host point at the workers.dev origin,
+  // not moodle-mcp.tryrehearsal.ai, so the OAuth issuer matches the staging hostname.
+  "vars": {
+    "OAUTH_ALLOW_CROSS_CLIENT_PKCE": "false",
+    "OAUTH_ALLOWED_DOMAINS": "jaipuria.ac.in",
+    "OAUTH_DEFAULT_CAMPUSES": "none",
+    "MCP_SERVER_BASE_URL": "https://jaipuria-os-moodle-mcp.ailabs-c94.workers.dev",
+    "MCP_ALLOWED_HOSTS": "jaipuria-os-moodle-mcp.ailabs-c94.workers.dev",
+    "MCP_IP_RATE_LIMIT": "1200",
+    "MCP_RATE_LIMIT_MAX_KEYS": "16384",
+    "MCP_TRUST_PROXY_HEADERS": "true",
+    "MCP_REQUIRE_AUDIT": "false",
+    "MCP_OTEL_ENDPOINT": "https://otlp.eu01.nr-data.net",
+    "MCP_CAPTURE_IDENTITY": "false",
+    "MCP_CAPTURE_ARGUMENTS": "false",
+    "MCP_CAPTURE_RESULTS": "false",
+    "MCP_CAPTURE_CLIENT_IP": "false",
+    "MCP_RBAC_MODE": "off",
+    "MCP_CAMPUSES": "noida,lucknow,jaipur,indore",
+    "MCP_STUDENT_SELF_ACCESS": "false",
+    "MCP_SELF_SERVICE_ACCESS": "true",
+    "AGENT_REPORT_QUEUE": "true",
+    "REPORT_PUBLIC_BASE_URL": "https://reports.tryrehearsal.ai",
+    "MCP_PII_REDACTION_MODE": "off"
+  }
+}
