@@ -27,13 +27,15 @@ cd "moodle-mcp" && source .venv/bin/activate
 MCP_URL="http://localhost:8899/mcp" \
   MCP_TOKEN="test-token-that-is-at-least-24-characters" python test_client.py
 ```
-Expected: 27 tools listed; `whoami` → admin/all; `cohort_pulse` → cohort KPIs; `at_risk_students` → a count.
+Expected from the source server: 30 tools listed; `whoami` shows the exact principal and scope;
+student sessions do not expose cohort tools. TrueFoundry virtual servers intentionally expose a
+smaller persona-specific subset.
 
 Before a production merge, also run the repeatable release checks:
 ```bash
 python scripts/validate_codex_packaging.py
 for test_file in tests/test_*.py; do FASTMCP_HOME=/tmp/moodle-fastmcp python "$test_file"; done
-python scripts/check_live_endpoint.py https://moodle-mcp.tryrehearsal.ai
+python scripts/check_live_endpoint.py https://moodle-mcp.rehearsal-os.app
 ```
 
 For a built local container with dummy Supabase settings, set `MCP_SMOKE_ONLY=1` on
@@ -51,7 +53,7 @@ without querying student data.
 3. **Create** → build (`pip install -r requirements.txt`) → start (`uvicorn server:app`) →
    Render health-checks `/health`.
 4. (Optional) set `MCP_SERVER_BASE_URL` to the assigned URL and add a custom domain
-   (`moodle-mcp.tryrehearsal.ai`).
+   (`moodle-mcp.rehearsal-os.app`).
 
 **Verify the deploy:**
 ```bash
@@ -82,9 +84,11 @@ A campus outside a token's grant returns `found:false` — verified.
 
 ## E. Google sign-in for Jaipuria accounts (recommended — no manual tokens)
 
-With OAuth configured, hosts like Claude.ai onboard every user through the standard
-MCP OAuth flow: the user adds the connector URL, clicks "Connect", signs in with their
-**@jaipuria.ac.in** Google account, and can use all MCP tools across campuses. No bearer token is ever handed out.
+With OAuth configured, hosts like Claude.ai onboard users through the standard MCP OAuth flow: the
+user adds the connector URL, clicks "Connect", and signs in with their **@jaipuria.ac.in** Google
+account. OAuth proves identity; it does not grant data. Students receive self-only access, the
+approved eight staff accounts receive cross-campus data access, each approved dean receives only
+their campus, and every other account is denied. No bearer token is handed to the user.
 (Without this, Claude.ai shows *"Couldn't register with Moodle's sign-in service"*
 and falls back to asking each user for a token.)
 
@@ -110,8 +114,10 @@ Workspace** account:
 | `MCP_SERVER_BASE_URL` | `https://<render-url>` (must be the public https URL) |
 | `OAUTH_JWT_SIGNING_KEY` | `python3 -c "import secrets;print(secrets.token_urlsafe(48))"` — keeps logins valid across redeploys |
 | `OAUTH_ALLOWED_DOMAINS` | `jaipuria.ac.in` (default) |
-| `OAUTH_DEFAULT_CAMPUSES` | applies only to other allowed domains; Jaipuria IDs always get all campuses |
-| `MCP_FACULTY` | optional explicit grants for external accounts; Jaipuria entries do not narrow access |
+| `MCP_RBAC_MODE` | `enforce` — makes `public.mcp_faculty` authoritative |
+| `OAUTH_DEFAULT_CAMPUSES` | `none` — unlisted accounts receive no data access |
+| `MCP_SELF_SERVICE_ACCESS` | `false` — whitelist-only; no pending self-service sessions |
+| `MCP_FACULTY` | legacy override; ignored in `enforce` mode |
 
 ### 3. Connect
 

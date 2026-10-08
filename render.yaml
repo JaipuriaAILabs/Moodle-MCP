@@ -97,16 +97,26 @@ services:
         value: "32768"
       - key: MCP_CAPTURE_RESULT_MAX_BYTES
         value: "262144"
-      # Keep RBAC explicitly staged. Move off -> shadow -> enforce only after the
-      # grant roster and would-deny telemetry have been reviewed.
+      # Zero-trust PII boundary: FastMCP ToolResult structured/text content is
+      # pseudonymised before it leaves the server or enters the audit result field.
+      # This dedicated key must be stable across deploys; changing it rotates S_* refs.
+      - key: MCP_PII_HMAC_KEY
+        sync: false
+      - key: MCP_PII_REDACTION_MODE
+        value: "enforce"
+      # The Supabase mcp_faculty registry is the authoritative whitelist.
+      # Unlisted identities are denied and campus_admin grants are single-campus.
       - key: MCP_RBAC_MODE
-        value: "off"
+        value: "enforce"
       - key: MCP_CAMPUSES
         value: noida,lucknow,jaipur,indore
       - key: MCP_STUDENT_SELF_ACCESS
-        value: "false"
-      - key: MCP_SELF_SERVICE_ACCESS
+        # Student identities resolve from the roster and are restricted to the
+        # reviewed self-only tool allowlist + their own enrolment IDs. Any lookup
+        # failure denies; it never falls through to educator/campus access.
         value: "true"
+      - key: MCP_SELF_SERVICE_ACCESS
+        value: "false"
       # Optional identity-free access-request relay. Configure both values together;
       # leaving both blank keeps notification disabled and the DB queue authoritative.
       - key: MCP_ACCESS_REQUEST_WEBHOOK_URL

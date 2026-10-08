@@ -128,14 +128,20 @@ print("\n[ 3. live GuardMiddleware wiring (patched deps) ]")
 import fastmcp.server.dependencies as _deps  # noqa: E402
 
 # get_http_headers is imported *inside* build_middleware at call time, so patch first.
-_deps.get_http_headers = lambda: {"user-agent": "Harness/1.0", "x-request-id": "req-9",
-                                  "x-forwarded-for": "9.9.9.9, 10.0.0.1"}
+def _middleware_headers(include_all=False, include=None):
+    if include and "authorization" in include:
+        return {"authorization": "Bearer ignored-in-oauth-mode"}
+    return {"user-agent": "Harness/1.0", "x-request-id": "req-9",
+            "x-forwarded-for": "9.9.9.9, 10.0.0.1"}
+
+
+_deps.get_http_headers = _middleware_headers
 # Exercise the real production auth branch: OAuth is considered configured only when
 # both Google credentials are present. A patched OAuth resolver alone must not make a
 # nominally-static deployment behave like OAuth.
 _set(google_oauth_client_id="client.apps.googleusercontent.com",
      google_oauth_client_secret="test-secret")
-security.resolve_oauth_principal = lambda: PRIN
+security.resolve_request_principal = lambda headers=None: PRIN
 
 CALLS = []
 
@@ -147,7 +153,9 @@ async def _fake_record(**kw):
 
 audit_store.record_tool_call = _fake_record  # local `from audit_store import` picks this up
 _set(require_audit=False, capture_identity=True, capture_arguments=True,
-     capture_results=True, capture_client_ip=True)
+     capture_results=True, capture_client_ip=True,
+     pii_hmac_key="unit-test-pii-key-0123456789abcdef",
+     pii_redaction_mode_raw="enforce")
 
 mw = security.build_middleware(90, 60)
 
@@ -162,7 +170,10 @@ class _Ctx:
 
 
 async def _ok_next(ctx):
-    return ToolResult(structured_content={"student_id": "JN25MM002"})
+    raw = {"student_id": "JN25MM002", "student_name": "Aashna Gupta",
+           "student_email": "aashna.gupta@jaipuria.ac.in"}
+    return ToolResult(structured_content=raw,
+                      content=[TextContent(type="text", text=json.dumps(raw))])
 
 res = asyncio.run(mw.on_call_tool(_Ctx(), _ok_next))
 succ = [c for c in CALLS if c.get("ok") is True]
@@ -174,8 +185,14 @@ check("middleware records resolved campus scope", succ[0].get("scope") == "jaipu
 # proxy-appended value; the leftmost (9.9.9.9) is client-supplied/spoofable.
 check("middleware forwards the TRUSTED (rightmost) X-Forwarded-For hop",
       succ[0].get("source_ip") == "10.0.0.1")
-check("middleware returned the tool result unchanged",
-      isinstance(res, ToolResult) and res.structured_content.get("student_id") == "JN25MM002")
+served_blob = json.dumps(res.model_dump(mode="json"))
+check("middleware preserves ToolResult while redacting structured + text content",
+      isinstance(res, ToolResult) and res.structured_content.get("student_id", "").startswith("S_")
+      and "JN25MM002" not in served_blob and "Aashna Gupta" not in served_blob
+      and "aashna.gupta@jaipuria.ac.in" not in served_blob)
+audit_blob = json.dumps(succ[0].get("result").model_dump(mode="json"))
+check("success audit receives exactly the redacted result",
+      "JN25MM002" not in audit_blob and "Aashna Gupta" not in audit_blob)
 
 print("\n[ 3b. error path — call_next raises, result NOT captured, args still are ]")
 CALLS.clear()
@@ -203,6 +220,7 @@ outcomes = [c.get("ok") for c in CALLS]
 check("attempt (ok=None) recorded before success (ok=True)", outcomes[:2] == [None, True])
 check("attempt record has no result yet", CALLS[0].get("result") is None)
 _set(require_audit=False)
+_set(pii_redaction_mode_raw="off", pii_hmac_key="")
 
 print("\n[ 4. on_initialize records a 'connect' event (AIA-1210 connection counts) ]")
 CALLS.clear()

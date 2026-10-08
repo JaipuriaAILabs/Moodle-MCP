@@ -1,0 +1,29 @@
+{
+  "type": "gateway-data-access-config",
+  "rules": [
+    {
+      "id": "default-everyone-own-data",
+      "name": "Everyone can inspect only their own traces and metrics",
+      "subjects": ["team:everyone"],
+      "data_types": ["traces", "metrics"],
+      "scope": "own_data",
+      "enabled": true
+    },
+    {
+      "id": "default-everyone-team-data",
+      "name": "Team members can inspect aggregate virtual-account metrics only",
+      "subjects": ["team:everyone"],
+      "data_types": ["metrics"],
+      "scope": "team_virtual_account_data",
+      "enabled": true
+    },
+    {
+      "id": "jaipuria-tenant-admin-all-data",
+      "name": "Tenant administrators can investigate all operational data",
+      "subjects": ["role:tenant-admin"],
+      "data_types": ["traces", "metrics"],
+      "scope": "all_data",
+      "enabled": true
+    }
+  ]
+}

@@ -13,6 +13,7 @@ os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-key")
 
 import tools.common as common  # noqa: E402  (real find_student — not monkeypatched here)
+from fastmcp.exceptions import ToolError  # noqa: E402
 
 PASS, FAIL = 0, 0
 
@@ -96,6 +97,38 @@ pat, _ = _pattern_for("x,y).ilike.(evil")   # attempt to break out of the or-fil
 bad = [c for c in pat.replace("student_name.ilike.", "").replace("student_id.ilike.", "")
        .replace(",", "") if not (c.isalnum() or c in "*- ")]
 check("no PostgREST-breaking chars survive sanitisation", bad == [])
+
+
+class _AmbigQ(_Q):
+    def execute(self):
+        class _R:
+            data = []
+        if self.rec.get("or"):
+            _R.data = [
+                {"student_id": "JN25MM002", "student_name": "Rahul Sharma",
+                 "campus": "noida", "batch": "2025-27"},
+                {"student_id": "JL25MM019", "student_name": "Rahul Sharma",
+                 "campus": "lucknow", "batch": "2025-27"},
+            ]
+        return _R()
+
+
+class _AmbigClient(_Client):
+    def table(self, name):
+        return _AmbigQ(self.rec)
+
+
+print("\n[ ambiguous lookup errors never disclose roster PII ]")
+ambig = Svc({})
+ambig.client = _AmbigClient({})
+try:
+    common.find_student(ambig, "Rahul")
+    err = ""
+except ToolError as exc:
+    err = str(exc)
+check("ambiguous lookup raises a safe error", "Multiple students match" in err)
+check("candidate names/ids omitted from error",
+      "Rahul Sharma" not in err and "JN25MM002" not in err and "JL25MM019" not in err)
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

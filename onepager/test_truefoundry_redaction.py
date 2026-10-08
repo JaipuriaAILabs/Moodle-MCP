@@ -1,9 +1,8 @@
 """onepager TrueFoundry gateway routing + token-then-stitch (offline, plain asserts, mocked urlopen).
 
-Proves (AIA-1386): in TrueFoundry mode the real student name never enters the prompt (a pseudonym
-does), the call is routed through the TFY AI Gateway with a Bearer key and the X-TFY-GUARDRAILS
-input-guardrail header, TrueFoundry takes precedence over Portkey when both are set, and direct mode
-is unchanged. No network / no real key needed.
+Proves (AIA-1012/AIA-1386): in TrueFoundry mode the real student name never enters the prompt, the
+call carries bilateral and advanced guardrails plus bounded execution controls, production fails
+closed without TrueFoundry, and direct mode remains development-only. No network or real key needed.
 
     ../moodle-agent/.venv/bin/python onepager/test_truefoundry_redaction.py
 """
@@ -80,7 +79,10 @@ print("[ TrueFoundry mode: no real name in prompt, routed via TFY gateway with g
 os.environ["TRUEFOUNDRY_API_KEY"] = "tfy-test-key"
 os.environ["TRUEFOUNDRY_BASE_URL"] = "https://gradelessai.truefoundry.cloud/api/llm/openai"
 os.environ["TRUEFOUNDRY_MODEL"] = "openrouter-main/google/gemini-2.5-flash"
-os.environ["TRUEFOUNDRY_GUARDRAILS"] = "moodle-pii/pii-redaction"
+os.environ["TRUEFOUNDRY_INPUT_GUARDRAILS"] = "moodle-pii/pii-redaction"
+os.environ["TRUEFOUNDRY_OUTPUT_GUARDRAILS"] = "moodle-pii/pii-redaction"
+os.environ["TRUEFOUNDRY_PROMPT_INJECTION_GUARDRAIL"] = "moodle-security/prompt-injection"
+os.environ["TRUEFOUNDRY_SECRETS_GUARDRAIL"] = "moodle-security/secrets"
 n, _usage = build_report.llm_narrative(D, F, "google/gemini-2.5-flash")
 body = json.loads(CAP["data"])
 check("routed to TFY gateway /chat/completions",
@@ -92,33 +94,48 @@ check("pseudonym present in prompt", "Aarav" in CAP["data"])
 check("Authorization: Bearer <tfy key> sent", CAP["headers"].get("authorization") == "Bearer tfy-test-key")
 gr = json.loads(CAP["headers"].get("x-tfy-guardrails", "{}"))
 check("X-TFY-GUARDRAILS input hook = moodle-pii/pii-redaction",
-      gr.get("llm_input_guardrails") == ["moodle-pii/pii-redaction"])
-
-print("\n[ precedence: TrueFoundry wins when both TFY and Portkey keys are set ]")
-os.environ["PORTKEY_API_KEY"] = "pk-test"
-build_report.llm_narrative(D, F, "google/gemini-2.5-flash")
-check("still routed to TFY (not Portkey)", "truefoundry.cloud" in CAP["url"])
-check("no x-portkey-api-key header in TFY mode", "x-portkey-api-key" not in CAP["headers"])
-del os.environ["PORTKEY_API_KEY"]
-
-print("\n[ default guardrail when TRUEFOUNDRY_GUARDRAILS unset ]")
-del os.environ["TRUEFOUNDRY_GUARDRAILS"]
-build_report.llm_narrative(D, F, "google/gemini-2.5-flash")
-gr2 = json.loads(CAP["headers"].get("x-tfy-guardrails", "{}"))
-check("defaults to moodle-pii/pii-redaction", gr2.get("llm_input_guardrails") == ["moodle-pii/pii-redaction"])
+      "moodle-pii/pii-redaction" in gr.get("llm_input_guardrails", []))
+check("X-TFY-GUARDRAILS output hook = moodle-pii/pii-redaction",
+      "moodle-pii/pii-redaction" in gr.get("llm_output_guardrails", []))
+check("stream=false so output guardrails execute", body.get("stream") is False)
+check("gateway body logging disabled",
+      json.loads(CAP["headers"].get("x-tfy-logging-config", "{}"))["enabled"] is False)
+check("provider web search disabled", CAP["headers"].get("x-tfy-disable-web-search") == "true")
+check("gateway request timeout pinned", CAP["headers"].get("x-tfy-request-timeout") == "60000")
+retry = json.loads(CAP["headers"].get("x-tfy-retry-config", "{}"))
+check("gateway retries bounded", retry.get("attempts") == 2 and 429 in retry.get("onStatusCodes", []))
+check("guardrail scope covers every attempt", CAP["headers"].get("x-tfy-guardrails-scope") == "all")
+check("Prompt Injection guardrail attached to input",
+      "moodle-security/prompt-injection" in gr.get("llm_input_guardrails", []))
+check("Secrets Detection guardrail attached to output",
+      "moodle-security/secrets" in gr.get("llm_output_guardrails", []))
+metadata = json.loads(CAP["headers"].get("x-tfy-metadata", "{}"))
+check("TrueFoundry metadata carries no student identity",
+      not any(x in json.dumps(metadata) for x in ("Rahul", "Sharma", "JN25MM002")))
 
 print("\n[ stitch_name: pseudonym -> real name after generation ]")
 n = build_report.stitch_name(n, "Rahul")
 check("headline stitched to real name", n["headline"].startswith("Hi Rahul."))
 check("no pseudonym left anywhere", "Aarav" not in json.dumps(n))
 
-print("\n[ direct mode (no gateway): unchanged, real name in prompt ]")
+print("\n[ direct development mode: pseudonym remains mandatory ]")
 for k in ("TRUEFOUNDRY_API_KEY", "TRUEFOUNDRY_BASE_URL", "TRUEFOUNDRY_MODEL"):
     os.environ.pop(k, None)
 build_report.llm_narrative(D, F, "google/gemini-2.5-flash")
 check("routed to OpenRouter", CAP["url"] == "https://openrouter.ai/api/v1/chat/completions")
-check("real first name present in direct-mode prompt", "Rahul" in CAP["data"])
+check("real first name absent in direct-mode prompt", "Rahul" not in CAP["data"])
+check("pseudonym present in direct-mode prompt", "Aarav" in CAP["data"])
 check("no X-TFY-GUARDRAILS header in direct mode", "x-tfy-guardrails" not in CAP["headers"])
+
+print("\n[ production: no direct-provider privacy downgrade ]")
+os.environ["TRUEFOUNDRY_REQUIRED"] = "1"
+try:
+    build_report.llm_narrative(D, F, "google/gemini-2.5-flash")
+except RuntimeError as exc:
+    check("missing TrueFoundry fails closed", "required" in str(exc).lower())
+else:
+    check("missing TrueFoundry fails closed", False)
+del os.environ["TRUEFOUNDRY_REQUIRED"]
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

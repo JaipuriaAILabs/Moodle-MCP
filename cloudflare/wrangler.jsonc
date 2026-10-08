@@ -71,6 +71,6 @@
     "MCP_SELF_SERVICE_ACCESS": "true",
     "AGENT_REPORT_QUEUE": "true",
     "REPORT_PUBLIC_BASE_URL": "https://reports.tryrehearsal.ai",
-    "MCP_PII_REDACTION_MODE": "off"
+    "MCP_PII_REDACTION_MODE": "enforce"
   }
 }

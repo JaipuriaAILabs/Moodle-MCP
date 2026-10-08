@@ -1,0 +1,61 @@
+{
+  "type": "mcp-server/virtual",
+  "name": "jaipuria-moodle-staff",
+  "display_name": "Jaipuria Moodle — authorized leadership",
+  "description": "Curated analytics and report surface for the approved cross-campus users and campus deans. Source-side RBAC constrains each dean to their campus.",
+  "best_effort_mode": false,
+  "servers": [
+    {
+      "name": "jaipuria-moodle-prod",
+      "enabled_tools": [
+        "whoami",
+        "list_students",
+        "get_student",
+        "student_marks",
+        "student_attendance",
+        "list_subjects",
+        "subject_performance",
+        "section_compare",
+        "assessment_breakdown",
+        "subject_difficulty",
+        "campus_performance_report",
+        "declining_students",
+        "student_trajectory",
+        "student_360",
+        "cohort_pulse",
+        "watchlist",
+        "marks_overview",
+        "attendance_overview",
+        "top_performers",
+        "cohort_compare",
+        "at_risk_students",
+        "attendance_watch",
+        "zero_alerts",
+        "get_student_report",
+        "report_data_availability",
+        "create_report",
+        "get_report_job",
+        "resolve_identities"
+      ]
+    }
+  ],
+  "collaborators": [
+    {"subject": "user:shreevats@jaipuria.ac.in", "role_id": "mcp-server-user"},
+    {"subject": "user:shiva.kakkar@jaipuria.ac.in", "role_id": "mcp-server-user"},
+    {"subject": "user:prabhat.pankaj@jaipuria.ac.in", "role_id": "mcp-server-user"},
+    {"subject": "user:shailaja.sharma@jaipuria.ac.in", "role_id": "mcp-server-user"},
+    {"subject": "user:amit.attry@jaipuria.ac.in", "role_id": "mcp-server-user"},
+    {"subject": "user:sauresh.mehrotra@jaipuria.ac.in", "role_id": "mcp-server-user"},
+    {"subject": "user:kanchan.rana@jaipuria.ac.in", "role_id": "mcp-server-user"},
+    {"subject": "user:sandip.das@jaipuria.ac.in", "role_id": "mcp-server-user"},
+    {"subject": "user:rahul.singh@jaipuria.ac.in", "role_id": "mcp-server-user"},
+    {"subject": "user:sushma.vishnani@jaipuria.ac.in", "role_id": "mcp-server-user"},
+    {"subject": "user:daneshwar.sharma@jaipuria.ac.in", "role_id": "mcp-server-user"},
+    {"subject": "user:deepankar.chakrabarti@jaipuria.ac.in", "role_id": "mcp-server-user"}
+  ],
+  "tags": {
+    "application": "moodle-mcp",
+    "persona": "authorized-staff",
+    "data_class": "restricted-academic"
+  }
+}

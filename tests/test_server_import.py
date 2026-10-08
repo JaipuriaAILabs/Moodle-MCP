@@ -9,8 +9,10 @@ Starlette 1.x `add_event_handler` removal (deploy crash, commit 91ddf68).
 
 Run:  ../moodle-agent/.venv/bin/python tests/test_server_import.py
 """
+import asyncio
 import os
 import sys
+from types import SimpleNamespace
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -53,6 +55,49 @@ if imported:
     # whoami is always registered (@mcp.tool turns it into a Tool object, not a plain
     # function); its mere presence means the decorator + all tool registration ran.
     check("whoami tool is registered", getattr(server, "whoami", None) is not None)
+
+    print("\n[ static-token dependency keeps Authorization under FastMCP 3.4.5 ]")
+    import fastmcp.server.dependencies as dependencies
+
+    original_get_headers = dependencies.get_http_headers
+    original_resolve_request_principal = server.resolve_request_principal
+    original_create_service = server.create_service
+    header_calls = []
+    auth_inputs = []
+
+    def fake_get_headers(include_all=False, include=None):
+        header_calls.append({"include_all": include_all, "include": include})
+        if include and "authorization" in include:
+            return {"authorization": "Bearer regression-static-token"}
+        return {"traceparent": "00-00000000000000000000000000000001-0000000000000001-01"}
+
+    dependencies.get_http_headers = fake_get_headers
+    def fake_resolve_request_principal(headers):
+        auth_inputs.append(headers)
+        return (
+            {"name": "Regression Admin", "campuses": None, "role": "admin"}
+            if headers == {"authorization": "Bearer regression-static-token"} else None
+        )
+
+    server.resolve_request_principal = fake_resolve_request_principal
+    server.create_service = lambda principal: SimpleNamespace(principal=principal)
+    try:
+        service = asyncio.run(server.get_authenticated_service())
+        check("Authorization is requested explicitly", any(
+            call["include"] and "authorization" in call["include"]
+            for call in header_calls
+        ))
+        check("only filtered auth headers reach the principal resolver", auth_inputs == [
+            {"authorization": "Bearer regression-static-token"}
+        ])
+        check("static bearer resolves inside the tool dependency",
+              service.principal["role"] == "admin")
+    except Exception as e:  # noqa: BLE001
+        check(f"static bearer resolves without raising ({type(e).__name__}: {e})", False)
+    finally:
+        dependencies.get_http_headers = original_get_headers
+        server.resolve_request_principal = original_resolve_request_principal
+        server.create_service = original_create_service
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

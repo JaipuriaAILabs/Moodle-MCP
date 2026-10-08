@@ -1,3 +1,13 @@
+-- SUPERSEDED — DO NOT APPLY.
+--
+-- This draft deliberately failed open when request scope was absent and allowed student-id OR campus
+-- membership. That is not safe for production student isolation. Use these reviewed two-stage migrations:
+--   1. 2026-10-08_mcp_scope_contract.sql
+--   2. 2026-10-08_mcp_scope_rls_enforce.sql
+-- and follow docs/RBAC_ENFORCEMENT_EXECUTION_PLAN.md.
+--
+-- Historical draft retained only for audit context below.
+--
 -- AIA-1386 (D1) — per-student + per-campus RLS on the Moodle student data, as DEFENSE-IN-DEPTH
 -- behind the app-layer boundary (apply_student / apply_campus). Goal: even if application filtering
 -- regresses, the shared read-only DB credential cannot return another student's / another campus's rows.

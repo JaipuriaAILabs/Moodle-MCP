@@ -19,8 +19,9 @@ against. PII-blindness is orthogonal to authorisation — a director's model sti
 
 ## Token
 `student_ref = "S_" + HMAC_SHA256(key, lower(student_id))[:12]` — stable (same id → same ref within a
-key), opaque, one-way. The MCP holds the key (`MCP_PII_HMAC_KEY`, else the audit key); the harness does
-**not** need it — it gets refs from the MCP (below), never computes them.
+key), opaque, one-way. Production redaction requires a dedicated `MCP_PII_HMAC_KEY` of at least 32
+characters and never falls back to the audit key. The legacy dormant tokenisation helper can still
+derive from the audit key for backwards compatibility; the harness never computes refs itself.
 
 ## MCP-side surface (shipped, dormant until `MCP_PII_TOKENIZE=true`)
 1. **`resolve_identities(students: [name|id,…])` tool** — maps each to
@@ -43,7 +44,7 @@ key), opaque, one-way. The MCP holds the key (`MCP_PII_HMAC_KEY`, else the audit
 ## Flags
 - `MCP_PII_TOKENIZE` (default **false**) — turns on response tokenisation. Keep OFF until the harness
   strips `_identity` and rehydrates, or clients would show refs and the map would reach the model.
-- `MCP_PII_HMAC_KEY` (optional; falls back to `MCP_AUDIT_HMAC_KEY`).
+- `MCP_PII_HMAC_KEY` (mandatory and dedicated for production `shadow`/`enforce`; minimum 32 chars).
 
 ## Rollout
 `resolve_identities` + the tokeniser are live-but-dormant now (flag off, zero impact). Flip

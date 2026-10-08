@@ -57,7 +57,7 @@ wrangler secret put OAUTH_REDIRECT_HOSTS
 
 # Audit + PII HMAC
 wrangler secret put MCP_AUDIT_HMAC_KEY
-wrangler secret put MCP_PII_HMAC_KEY            # required before MCP_PII_REDACTION_MODE=shadow/enforce
+wrangler secret put MCP_PII_HMAC_KEY            # mandatory: committed prod/staging mode is enforce
 
 # Optional — set only if the feature is on
 wrangler secret put MCP_REDIS_URL                   # only if scaling >1 instance

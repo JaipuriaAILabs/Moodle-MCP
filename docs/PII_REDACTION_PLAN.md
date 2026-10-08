@@ -19,8 +19,8 @@ The Moodle MCP's purpose is reports **about a specific student's marks/attendanc
 
 So the mechanism is **reversible pseudonymization of direct identifiers**, not blanket redaction.
 
-## 2. Why OpenRouter/Portkey built-in redaction is not enough
-Off-the-shelf gateway PII guardrails (OpenRouter, Portkey, Patronus/Aporia) are almost always
+## 2. Why generic gateway redaction is not enough
+Off-the-shelf gateway PII guardrails are almost always
 **one-way**: `name → [REDACTED]` or a category label, for safety/logging. That **destroys the
 value with no way to rehydrate** — which is exactly why "how do we reinsert it" is hard. It's
 also generic ML/NER: it mis-detects and mangles Indian names, and offers no stable handle to
@@ -70,20 +70,19 @@ proxy needed for the highest-volume identifier exposure — a clean, use-case-sp
 ## 6. Architecture — where it lives
 The DPDP-sensitive hop is **harness → OpenRouter → model** (external). MCP→harness is first-party,
 in-region (fine to carry real data). So the mechanism belongs in **the harness's model-call pipeline
-or the gateway it calls** — Rajika's domain, tied to **AIA-1356** (Portkey guardrails).
+or the gateway it calls** — tied to **AIA-1356**, with TrueFoundry as the production control plane.
 Options, best first:
 - **A. Reversible pseudonymization middleware in the harness's LLM path** (a request/response
-  hook, or a thin proxy the harness points at instead of Portkey directly). Full control of the token
+  hook, or a thin proxy behind the harness). Full control of the token
   vault + streaming. **Recommended.**
-- **B. Portkey custom guardrail pair** (before/after hooks) — only if Portkey hooks can share a
-  request-scoped store; most hook systems are stateless, so the vault is awkward. Usable as the
-  secondary net (irreversible detection/alerting), not the reversible map.
+- **B. TrueFoundry bilateral guardrails** (input/output) — use as the secondary net for mutation,
+  detection and blocking. The request-scoped pseudonym map remains application-owned.
 - **C. In the MCP** — rejected as the primary: the MCP isn't in the LLM response loop, so it
   can't rehydrate. Its role is to **tag PII fields** (§3) to make A/B exact.
 
 ## 7. Governance layer (cheaper than engineering, do around launch)
 Independent of the token mechanism, these cut DPDP risk immediately:
-- **Zero-retention + no-training LLM routes** — configure OpenRouter/Portkey to only use
+- **Zero-retention + no-training LLM routes** — configure the TrueFoundry virtual model to use only
   providers with no-logging / no-training, and disable prompt logging at the gateway.
 - **DPA + cross-border**: confirm processor agreements and DPDP-permitted transfer for the
   model providers; prefer in-region where possible.
