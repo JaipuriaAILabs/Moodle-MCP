@@ -12,6 +12,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Minimal config so `import config` succeeds without a real .env.
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-key")
+# Historical mode-specific assertions below opt into OFF explicitly; production defaults enforce.
+os.environ.setdefault("MCP_RBAC_MODE", "off")
 
 PASS, FAIL = 0, 0
 

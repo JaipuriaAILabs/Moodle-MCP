@@ -17,6 +17,8 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-key")
 
 import config  # noqa: E402
 import pii  # noqa: E402
+from fastmcp.tools.tool import ToolResult  # noqa: E402
+from mcp.types import EmbeddedResource, TextContent, TextResourceContents  # noqa: E402
 
 PASS, FAIL = 0, 0
 
@@ -97,6 +99,46 @@ config.settings.pii_redaction_mode_raw = "off"
 print("\n[ scalar + empty-result safety ]")
 check("bare string passes through leak guard", pii.redact("hello world")[0] == "hello world")
 check("empty dict -> empty dict, no crash", pii.redact({})[0] == {})
+
+print("\n[ real FastMCP ToolResult: every model-visible representation is redacted ]")
+wrapped = ToolResult(
+    structured_content=PAYLOAD,
+    content=[
+        TextContent(type="text", text=json.dumps(PAYLOAD)),
+        EmbeddedResource(
+            type="resource",
+            resource=TextResourceContents(
+                uri="file:///student-summary.txt",
+                mimeType="text/plain",
+                text="Rahul Sharma / JN25MM002 / rahul.sharma@jaipuria.ac.in",
+            ),
+        ),
+    ],
+    meta={"student": "Rahul Sharma", "student_id": "JN25MM002"},
+)
+wrapped_red, wrapped_stats = pii.redact(wrapped)
+wrapped_blob = json.dumps(wrapped_red.model_dump(mode="json"))
+check("ToolResult type preserved", isinstance(wrapped_red, ToolResult))
+for canary in ("Rahul Sharma", "Rahul", "JN25MM002", "rahul.sharma@jaipuria.ac.in"):
+    check(f"ToolResult canary gone: {canary!r}", canary not in wrapped_blob)
+check("ToolResult structured_content tokenised",
+      wrapped_red.structured_content["students"][0]["student_id"] == REF)
+check("ToolResult JSON TextContent tokenised",
+      json.loads(wrapped_red.content[0].text)["students"][0]["student_id"] == REF)
+check("ToolResult embedded text swept", REF in wrapped_red.content[1].resource.text)
+check("ToolResult input not mutated",
+      wrapped.structured_content["students"][0]["student_name"] == "Rahul Sharma")
+check("ToolResult stats see identity", wrapped_stats["ids"] == 1)
+
+print("\n[ generic Indian identifier leak guard ]")
+generic, generic_stats = pii.redact({
+    "message": "Student JI25PG183 supplied PAN ABCDE1234F and Aadhaar 1234 5678 9012."
+})
+generic_blob = generic["message"]
+check("bare enrolment id removed", "JI25PG183" not in generic_blob and "[STUDENT_ID]" in generic_blob)
+check("PAN removed", "ABCDE1234F" not in generic_blob and "[PAN]" in generic_blob)
+check("Aadhaar removed", "1234 5678 9012" not in generic_blob and "[AADHAAR]" in generic_blob)
+check("generic identifiers counted", generic_stats["leak"] == 3)
 
 config.settings.pii_hmac_key = ""
 print(f"\n{PASS} passed, {FAIL} failed")

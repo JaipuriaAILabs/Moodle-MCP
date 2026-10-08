@@ -147,14 +147,18 @@ async def get_authenticated_service():
     from fastmcp.server.dependencies import get_http_headers
 
     import telemetry
+    # FastMCP 3.4.5 intentionally strips Authorization from get_http_headers()
+    # unless it is explicitly included. Keep the ordinary header view redacted
+    # for telemetry, and request the bearer separately for static-token mode.
     _headers = get_http_headers() or {}
+    _auth_headers = get_http_headers(include={"authorization"}) or {}
     # Parent to the caller's (client harness) span when it propagated a W3C traceparent.
     span = telemetry.start_span("mcp.auth", _headers)  # None unless OTel tracing is enabled
     mode = "oauth" if settings.oauth_enabled() else "static"
     try:
         principal = resolve_oauth_principal() if settings.oauth_enabled() else None
         if principal is None:
-            principal = resolve_principal(bearer_of(_headers))
+            principal = resolve_principal(bearer_of(_auth_headers))
         if not principal:
             raise PermissionError("missing or invalid access token")
         svc = create_service(principal)

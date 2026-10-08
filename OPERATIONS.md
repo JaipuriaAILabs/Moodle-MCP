@@ -71,29 +71,29 @@ Action stays as a harmless backstop.
 - With OAuth enabled, `MCP_TOKENS` / `MCP_ADMIN_TOKEN` are never consulted on
   `/mcp` (FastMCP rejects foreign bearers first). Remove them from Render so they
   are not live secrets sitting unused in env.
-- Every verified `jaipuria.ac.in` Google account, including students and alumni, can
-  use every MCP tool across campuses. `OAUTH_DEFAULT_CAMPUSES` and per-email grants
-  cannot narrow Jaipuria access. Keep the Google OAuth client restricted to the
-  Jaipuria Workspace and test with a real account after deployment.
+- Production is an explicit whitelist: `MCP_RBAC_MODE=enforce`,
+  `OAUTH_DEFAULT_CAMPUSES=none`, and `MCP_SELF_SERVICE_ACCESS=false`. Only active
+  rows in `public.mcp_faculty` can query data. Keep the Google OAuth client
+  restricted to the Jaipuria Workspace as an additional identity boundary.
 
-## Explicit grants for external accounts — the mcp_faculty registry
+## Authoritative data-access whitelist — the mcp_faculty registry
 
-Access for explicitly permitted external accounts is governed by the Supabase table `mcp_faculty`
+MCP data access is governed by the dedicated Supabase table `mcp_faculty`
 (email PK, `campuses` = `"all"` or `["noida","jaipur",...]`, `active`,
-`name`, `note`). The server grants Jaipuria IDs all campuses before consulting the table.
-For other domains, it uses this grant order:
+`name`, `note`). In enforce mode the resolution order is:
 
-1. `MCP_FACULTY` env — break-glass admin override (survives DB outages and a
-   poisoned roster; keep ONLY the administrator here);
-2. student-roster deny for external accounts;
-3. `mcp_faculty` row (active) — the normal path; malformed/inactive rows deny;
-4. `OAUTH_DEFAULT_CAMPUSES` — `none` in production, so everything else denies.
+1. active `mcp_faculty` row — the educator path; malformed/inactive rows deny;
+2. student-roster self-scope (only if explicitly enabled), otherwise deny;
+3. `OAUTH_DEFAULT_CAMPUSES` — `none` in production, so everything else denies.
+
+`MCP_FACULTY` is ignored in enforce mode. This prevents a stale, unaudited
+deployment variable from bypassing the Supabase whitelist.
 
 Lookups are cached ~60s (roster hits 10 min), so changes apply within a minute
 without a redeploy; a transient DB error serves the last-known-good grant for
 signed-in users and denies strangers (fail closed).
 
-**Add one external account** (service role, SQL editor):
+**Add one approved account** (service role, SQL editor):
 ```sql
 insert into mcp_faculty (email, name, campuses, note)
 values ('external@example.com', 'External Name', '["noida"]'::jsonb, 'added by <you>')
@@ -118,8 +118,8 @@ on conflict (email) do update
 ```
 (CSV `campuses` column: `all`, or `noida+jaipur` style.)
 
-**Revoke an external grant**: `update mcp_faculty set active=false, updated_at=now() where email='...';`
-— takes effect within the 60s cache TTL. This does not revoke Jaipuria-domain access.
+**Revoke a grant**: `update mcp_faculty set active=false, updated_at=now() where email='...';`
+— takes effect within the 60s cache TTL for every domain, including Jaipuria.
 
 **Invariants**: the MCP's own DB role (`reporting_readonly`) can SELECT this
 table and cannot write it (verified: INSERT → permission denied). `create_report` inputs are
