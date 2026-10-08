@@ -17,9 +17,8 @@ from starlette.routing import Route
 
 from annotations import READONLY_ANNOTATIONS
 from config import settings, validate_config
-from security import (HostGuard, SecurityHeaders, TransportGuard, bearer_of,
-                      build_middleware, quiet_noisy_loggers, resolve_principal,
-                      resolve_oauth_principal)
+from security import (HostGuard, SecurityHeaders, TransportGuard,
+                      build_middleware, quiet_noisy_loggers, resolve_request_principal)
 from supabase_client import create_service
 from tools import (access, actions, analytics, at_risk, identity, insights, reports, students,
                    subjects)
@@ -134,7 +133,7 @@ except Exception:  # noqa: BLE001 — a missing logo must never stop the server 
 
 mcp = FastMCP(name=settings.server_name, version=settings.server_version,
               instructions=INSTRUCTIONS, mask_error_details=True, auth=auth_provider,
-              icons=_ICONS, website_url="https://tryrehearsal.ai")
+              icons=_ICONS, website_url="https://www.jaipuria.ac.in")
 mcp.add_middleware(build_middleware(settings.rate_limit, settings.rate_window_seconds))
 
 
@@ -152,9 +151,7 @@ async def get_authenticated_service():
     span = telemetry.start_span("mcp.auth", _headers)  # None unless OTel tracing is enabled
     mode = "oauth" if settings.oauth_enabled() else "static"
     try:
-        principal = resolve_oauth_principal() if settings.oauth_enabled() else None
-        if principal is None:
-            principal = resolve_principal(bearer_of(_headers))
+        principal = resolve_request_principal(_headers)
         if not principal:
             raise PermissionError("missing or invalid access token")
         svc = create_service(principal)
@@ -237,6 +234,21 @@ async def brand_logo(request: Request):
 
 app.routes.insert(0, Route("/health", health_check, methods=["GET"]))
 app.routes.insert(0, Route("/brand/logo.png", brand_logo, methods=["GET"]))
+
+# Keep FastMCP's browser-bound consent/CSRF transaction intact, but present it as
+# the actual Jaipuria → Google sign-in step instead of a generic framework page.
+from auth_ui import GoogleConsentBranding  # noqa: E402
+_CONSENT_LOGO_PATH = _Path(__file__).parent / "onepager" / "assets" / "jaipuria-logo.png"
+_CONSENT_LOGO_DATA_URI = ""
+try:
+    _consent_logo_bytes = _CONSENT_LOGO_PATH.read_bytes()
+    _CONSENT_LOGO_DATA_URI = (
+        "data:image/png;base64," + _b64.b64encode(_consent_logo_bytes).decode("ascii")
+    )
+except OSError:
+    log.warning("Jaipuria consent logo not loaded from %s", _CONSENT_LOGO_PATH)
+app = GoogleConsentBranding(app, enabled=settings.oauth_enabled(),
+                            logo_data_uri=_CONSENT_LOGO_DATA_URI)
 
 # URL tolerance: hosts (and users typing connector URLs) reach the MCP endpoint whether
 # they enter .../mcp or just the bare domain — "/" is rewritten to "/mcp", and the root

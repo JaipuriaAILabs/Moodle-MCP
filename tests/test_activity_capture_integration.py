@@ -130,6 +130,11 @@ import fastmcp.server.dependencies as _deps  # noqa: E402
 # get_http_headers is imported *inside* build_middleware at call time, so patch first.
 _deps.get_http_headers = lambda: {"user-agent": "Harness/1.0", "x-request-id": "req-9",
                                   "x-forwarded-for": "9.9.9.9, 10.0.0.1"}
+# Exercise the real production auth branch: OAuth is considered configured only when
+# both Google credentials are present. A patched OAuth resolver alone must not make a
+# nominally-static deployment behave like OAuth.
+_set(google_oauth_client_id="client.apps.googleusercontent.com",
+     google_oauth_client_secret="test-secret")
 security.resolve_oauth_principal = lambda: PRIN
 
 CALLS = []

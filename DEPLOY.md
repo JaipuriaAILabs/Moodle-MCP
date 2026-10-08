@@ -106,6 +106,7 @@ Workspace** account:
 |---|---|
 | `GOOGLE_OAUTH_CLIENT_ID` | the client ID |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | the client secret |
+| `MCP_REQUIRE_GOOGLE_OAUTH` | `true` — fail boot if Google credentials are missing; prevents an auth-mode downgrade |
 | `MCP_SERVER_BASE_URL` | `https://<render-url>` (must be the public https URL) |
 | `OAUTH_JWT_SIGNING_KEY` | `python3 -c "import secrets;print(secrets.token_urlsafe(48))"` — keeps logins valid across redeploys |
 | `OAUTH_ALLOWED_DOMAINS` | `jaipuria.ac.in` (default) |
@@ -118,6 +119,10 @@ In Claude.ai / Claude Desktop: **Settings → Connectors → Add custom connecto
 URL `https://<render-url>/mcp` → **Connect** → Google sign-in. Done.
 
 Notes:
+- The Jaipuria consent page's **Continue with Google** button approves the requesting
+  MCP client and immediately hands the browser to Google's real OAuth flow. The local
+  consent/CSRF step remains enabled to prevent confused-deputy attacks; it is not a
+  password form and never receives Google credentials.
 - When OAuth is enabled, static `MCP_TOKENS`/`MCP_ADMIN_TOKEN` are **not** accepted on
   `/mcp` (FastMCP validates its own issued tokens); remove them or keep them only for
   a separate non-OAuth deployment.

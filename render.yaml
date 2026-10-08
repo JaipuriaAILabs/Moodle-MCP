@@ -24,6 +24,10 @@ services:
         sync: false
       - key: GOOGLE_OAUTH_CLIENT_SECRET
         sync: false
+      # Fail boot rather than silently downgrade to static-token auth when either
+      # Google secret is absent from the production environment.
+      - key: MCP_REQUIRE_GOOGLE_OAUTH
+        value: "true"
       - key: OAUTH_JWT_SIGNING_KEY
         sync: false
       # MUST be a STABLE, permanent value — the DCR client/token store is encrypted
