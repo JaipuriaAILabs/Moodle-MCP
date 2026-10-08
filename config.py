@@ -47,7 +47,8 @@ class Settings(BaseSettings):
     # Default for allowed-domain accounts with no explicit educator/student grant.
     # ENFORCE deployments should keep this at "none" for default-deny/pending behavior.
     oauth_default_campuses_raw: str = Field(default="none", alias="OAUTH_DEFAULT_CAMPUSES")
-    # Optional per-email overrides: JSON map email -> {name?, campuses} (null = all).
+    # Legacy per-email overrides: JSON map email -> {name?, campuses} (null = all).
+    # Ignored in MCP_RBAC_MODE=enforce so the audited DB registry stays authoritative.
     mcp_faculty_raw: str = Field(default="", alias="MCP_FACULTY")
     # Optional stable key so issued OAuth tokens survive a restart/redeploy.
     oauth_jwt_signing_key: str = Field(default="", alias="OAUTH_JWT_SIGNING_KEY")
@@ -161,7 +162,7 @@ class Settings(BaseSettings):
     gateway_enforced: bool = Field(default=False, alias="GATEWAY_ENFORCED")
     gateway_shared_secret: str = Field(default="", alias="GATEWAY_SHARED_SECRET")
 
-    # --- per-campus RBAC (AIA campus scoping). Default OFF preserves today's behavior.
+    # --- per-campus RBAC (AIA campus scoping). Default ENFORCE is fail-closed.
     #   off     : every verified jaipuria.ac.in account keeps all-campus access (the
     #             historical "G1 all-access" policy), except roster students are always
     #             self-scoped (when enabled) or denied. Non-student login stays DB-free.
@@ -171,13 +172,13 @@ class Settings(BaseSettings):
     #             against real traffic before flipping.
     #   enforce : mcp_faculty is authoritative for educators; students are self-scoped
     #             when enabled; unlisted accounts are pending or denied.
-    rbac_mode_raw: str = Field(default="off", alias="MCP_RBAC_MODE")
+    rbac_mode_raw: str = Field(default="enforce", alias="MCP_RBAC_MODE")
     # Canonical campus codes (lowercase), used to validate grants against known campuses.
     campuses_raw: str = Field(default="noida,lucknow,jaipur,indore", alias="MCP_CAMPUSES")
     # Self-service access (enforce mode): when on, an unprovisioned verified account is NOT
     # hard-denied — it gets a limited "pending" session that can only call request_access
     # (pick a campus+role → admin approval queue). Off = hard-deny unlisted accounts.
-    self_service_access: bool = Field(default=True, alias="MCP_SELF_SERVICE_ACCESS")
+    self_service_access: bool = Field(default=False, alias="MCP_SELF_SERVICE_ACCESS")
     # Optional approver notification for a newly filed self-service request. The
     # database queue remains the source of truth; the webhook gets no requester
     # identity (approvers use the admin-only queue for details).
@@ -326,9 +327,9 @@ class Settings(BaseSettings):
             return {}
 
     def rbac_mode(self) -> str:
-        """Normalised per-campus RBAC mode: 'off' | 'shadow' | 'enforce' (bad value -> 'off')."""
+        """Normalised per-campus RBAC mode (bad/empty values fail closed to 'enforce')."""
         mode = self.rbac_mode_raw.strip().lower()
-        return mode if mode in ("off", "shadow", "enforce") else "off"
+        return mode if mode in ("off", "shadow", "enforce") else "enforce"
 
     def campuses(self) -> list[str]:
         """Canonical lowercase campus codes for grant validation (e.g. noida/lucknow/jaipur/indore)."""

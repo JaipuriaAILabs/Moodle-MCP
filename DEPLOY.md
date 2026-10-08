@@ -109,8 +109,10 @@ Workspace** account:
 | `MCP_SERVER_BASE_URL` | `https://<render-url>` (must be the public https URL) |
 | `OAUTH_JWT_SIGNING_KEY` | `python3 -c "import secrets;print(secrets.token_urlsafe(48))"` — keeps logins valid across redeploys |
 | `OAUTH_ALLOWED_DOMAINS` | `jaipuria.ac.in` (default) |
-| `OAUTH_DEFAULT_CAMPUSES` | applies only to other allowed domains; Jaipuria IDs always get all campuses |
-| `MCP_FACULTY` | optional explicit grants for external accounts; Jaipuria entries do not narrow access |
+| `MCP_RBAC_MODE` | `enforce` — makes `public.mcp_faculty` authoritative |
+| `OAUTH_DEFAULT_CAMPUSES` | `none` — unlisted accounts receive no data access |
+| `MCP_SELF_SERVICE_ACCESS` | `false` — whitelist-only; no pending self-service sessions |
+| `MCP_FACULTY` | legacy override; ignored in `enforce` mode |
 
 ### 3. Connect
 

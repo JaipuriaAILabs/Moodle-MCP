@@ -12,6 +12,8 @@ os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-key")
 os.environ["OAUTH_DEFAULT_CAMPUSES"] = "none"
 os.environ["MCP_FACULTY"] = '{"admin@example.com": {"name": "Admin", "campuses": null}}'
+# This legacy suite explicitly exercises the historical OFF-mode behavior.
+os.environ["MCP_RBAC_MODE"] = "off"
 
 import config  # noqa: E402
 import faculty  # noqa: E402

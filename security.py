@@ -147,9 +147,11 @@ def _registry_principal(claims: dict, email: str, domain: str, *, quiet: bool = 
     from config import settings
     import faculty as registry
 
-    # 1. Env override (admin break-glass) — an EXPLICITLY listed email is allowed
-    #    regardless of domain (so a named guest can be granted without opening the gate).
-    override = settings.faculty().get(email)
+    # 1. Legacy env override. It is deliberately disabled in ENFORCE mode: production's
+    #    Supabase whitelist must have exactly one source of truth, and a stale Render env
+    #    value must not silently grant access outside the audited registry.
+    override = (settings.faculty().get(email)
+                if settings.rbac_mode() != "enforce" else None)
     if override is not None:
         camp = override.get("campuses")
         return {"name": override.get("name") or claims.get("name") or email, "email": email,

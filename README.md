@@ -175,7 +175,7 @@ boot check on the Supabase vars.
 | `MCP_SERVER_BASE_URL` | Public URL of this service (optional) | Render dashboard |
 | `MCP_RATE_LIMIT` | Tool calls allowed per token per window (default `90`) | — |
 | `MCP_RATE_WINDOW_SECONDS` | Rate-limit window in seconds (default `60`) | — |
-| `MCP_RBAC_MODE` | `off`, `shadow`, or `enforce`; use the documented staged cutover | — |
+| `MCP_RBAC_MODE` | Defaults to `enforce`; `public.mcp_faculty` is the authoritative whitelist | — |
 | `MCP_STUDENT_SELF_ACCESS` | Enables the self-id + batch-bounded student principal (default `false`) | — |
 | `MCP_ACCESS_REQUEST_WEBHOOK_URL` | Optional HTTPS approver relay; receives role/campus only | Approved relay |
 | `MCP_ACCESS_REQUEST_WEBHOOK_SECRET` | 32+ character HMAC key paired with the webhook URL | You generate it |
@@ -188,8 +188,8 @@ who / which tool / campus scope / outcome and never contain token contents, stud
 
 ## Access model
 
-Google email verification is required and lookalike domains are rejected. In `enforce` mode,
-educators receive only their active registry role/campuses; unlisted educators are pending or
+Google email verification is required and lookalike domains are rejected. Production runs in
+`enforce` mode: educators receive only their active registry role/campuses and unlisted users are
 denied. Student-roster accounts are never granted cohort-wide access in any mode: they are denied
 unless `MCP_STUDENT_SELF_ACCESS=true`, then every student-bearing query is forced to their own
 student id, campus, and batch. An explicit educator grant wins for a legitimate dual-role TA.
