@@ -24,8 +24,9 @@ APP_ICON = os.path.join(ASSETS, "app-icon.png")
 JAIPURIA_LOGO = os.path.join(ASSETS, "jaipuria-logo.png")
 _REPO_ROOT = os.path.dirname(HERE)
 # Env files scanned for OPENROUTER_API_KEY / PORTKEY_* (os.environ always wins). The repo-root
-# .env.portkey.local (gitignored) carries the Portkey creds for this workflow.
+# .env.truefoundry.local / .env.portkey.local (both gitignored) carry the gateway creds.
 ENV_FILES = [os.environ.get("OPENROUTER_ENV", ""), ".env",
+             os.path.join(_REPO_ROOT, ".env.truefoundry.local"),
              os.path.join(_REPO_ROOT, ".env.portkey.local"), os.path.join(_REPO_ROOT, ".env")]
 
 
@@ -150,18 +151,34 @@ def openrouter_key():
     return key
 
 
-# ----------------------------------------------------------------- Portkey + token-then-stitch
-# DPDP / AIA-1356: when the narrative LLM call is routed through Portkey (Step 0), the student's
-# real name must never appear in the prompt. Portkey's Pro PII (name) guardrail is plan-locked, so
-# names are NOT caught at the gateway — instead we send a fixed PSEUDONYM to the model and swap the
-# real first name back in after generation, before render (the create_report pattern, generalised).
-# The real name still appears in the RENDERED report (server-side, not an LLM input). Flag-gated on
-# the presence of PORTKEY_API_KEY: unset = today's behaviour (direct OpenRouter, name in prompt).
+# ----------------------------------------------------- gateway (TrueFoundry / Portkey) + token-then-stitch
+# DPDP / AIA-1386 / AIA-1356: when the narrative LLM call is routed through a PII gateway (Step 0),
+# the student's real name must never appear in the prompt. The gateway PII guardrail is ONE-WAY
+# (redact only, no reinsertion) and is configured to catch email/phone/gov-IDs, NOT the person name —
+# so names are handled by us: we send a fixed PSEUDONYM to the model and swap the real first name back
+# in after generation, before render (the create_report pattern, generalised). The real name still
+# appears only in the RENDERED report (server-side, never an LLM input).
+#
+# Two interchangeable gateways, both flag-gated on the presence of their key; TrueFoundry takes
+# precedence when both are set. Neither set = today's behaviour (direct OpenRouter, name in prompt):
+#   - TrueFoundry AI Gateway (AIA-1386): TRUEFOUNDRY_API_KEY + TRUEFOUNDRY_BASE_URL, guardrail
+#     attached per-request via the X-TFY-GUARDRAILS header (group/config in TRUEFOUNDRY_GUARDRAILS).
+#   - Portkey (AIA-1356): PORTKEY_API_KEY (+ optional PORTKEY_CONFIG_ID).
 PSEUDONYM = "Aarav"   # distinctive, name-shaped placeholder; word-bounded stitch avoids collisions
 
 
 def _portkey_enabled():
     return bool(_env("PORTKEY_API_KEY"))
+
+
+def _truefoundry_enabled():
+    # Needs both the key and the gateway base URL (the tenant's OpenAI-compatible endpoint).
+    return bool(_env("TRUEFOUNDRY_API_KEY") and _env("TRUEFOUNDRY_BASE_URL"))
+
+
+def _gateway_enabled():
+    """Any PII gateway in front of the model → the real name must be kept out of the prompt."""
+    return _truefoundry_enabled() or _portkey_enabled()
 
 
 def _log_guardrails(headers, data):
@@ -174,6 +191,18 @@ def _log_guardrails(headers, data):
               file=sys.stderr)
     except Exception as e:  # never fail a report over telemetry
         print(f"[portkey] guardrail log failed: {e}", file=sys.stderr)
+
+
+def _log_tfy(headers, data):
+    """Verify TrueFoundry redaction from the RESPONSE: log any guardrail results + x-tfy-* headers
+    (verdicts/counts only, never PII). Never fails the report."""
+    try:
+        gr = data.get("guardrails") or data.get("tfy_guardrails") or data.get("guardrail_results")
+        tf = {k: v for k, v in headers.items() if k.lower().startswith("x-tfy")}
+        print(f"[truefoundry] guardrails={json.dumps(gr) if gr else None} headers={tf or None}",
+              file=sys.stderr)
+    except Exception as e:  # never fail a report over telemetry
+        print(f"[truefoundry] guardrail log failed: {e}", file=sys.stderr)
 
 
 def stitch_name(n, real_first):
@@ -205,9 +234,9 @@ SCHEMA = {
 
 
 def llm_narrative(d, f, model, feedback=None):
-    # Step 4: in Portkey mode the real first name never enters the prompt — the model sees the
-    # pseudonym and stitch_name() restores the real name after generation (see main()).
-    first = PSEUDONYM if _portkey_enabled() else d["student"]["name"].split()[0]
+    # Step 4: in gateway mode (TrueFoundry or Portkey) the real first name never enters the prompt —
+    # the model sees the pseudonym and stitch_name() restores the real name after generation (see main()).
+    first = PSEUDONYM if _gateway_enabled() else d["student"]["name"].split()[0]
     prompt = f"""You write one-page end-of-trimester reports for MBA students at Jaipuria Institute of Management.
 Audience: the student ({first}), a 22-year-old MBA student in India reading this on a phone. Write like a friendly senior or mentor talking to him, in simple Indian English: short sentences (at most 14 words each), everyday words ("marks", "revise", "class", "quiz", "notes", "faculty"), no metaphors, no jargon, no abstract nouns. If a 15-year-old would not understand a sentence, rewrite it. British/Indian spelling; no em-dashes; no exclamation marks; no praise words ("great", "amazing").
 The trimester is CLOSED: the student cannot re-attempt anything. Every takeaway is something to carry into the next trimester, the specialisation, and placement interviews. Never suggest redoing, resubmitting, retaking or practising the same assessment.
@@ -245,7 +274,19 @@ BANNED anywhere in track text (title, learning, interview): digits, "%", "score"
         body = {"model": model, "temperature": 0.4, "messages": messages}
         if with_schema:
             body["response_format"] = {"type": "json_schema", "json_schema": {"name": "report", "strict": True, "schema": SCHEMA}}
-        if _portkey_enabled():
+        if _truefoundry_enabled():
+            # Step 0 (TrueFoundry): route through the TFY AI Gateway so its PII guardrail runs on the
+            # request. OpenAI-compatible; the gateway holds the provider key. The guardrail is attached
+            # per-request via X-TFY-GUARDRAILS (input hook); it is a ONE-WAY backstop for
+            # email/phone/gov-IDs — the person name is kept out by the pseudonym above, not the gateway.
+            url = _env("TRUEFOUNDRY_BASE_URL").rstrip("/") + "/chat/completions"
+            body["model"] = _env("TRUEFOUNDRY_MODEL") or model   # TFY model id, e.g. "<provider>/<model>"
+            headers = {"Content-Type": "application/json",
+                       "Authorization": f"Bearer {_env('TRUEFOUNDRY_API_KEY')}"}
+            gr = (_env("TRUEFOUNDRY_GUARDRAILS") or "moodle-pii/pii-redaction").strip()
+            if gr:
+                headers["X-TFY-GUARDRAILS"] = json.dumps({"llm_input_guardrails": [gr]})
+        elif _portkey_enabled():
             # Step 0: route through Portkey so the PII-redaction guardrails run. Portkey holds the
             # OpenRouter key (no Authorization header); the provider is named in the model string.
             url = "https://api.portkey.ai/v1/chat/completions"
@@ -266,7 +307,9 @@ BANNED anywhere in track text (title, learning, interview): digits, "%", "score"
         with urllib.request.urlopen(req, timeout=180) as resp:  # nosec B310
             data = json.load(resp)
             hdrs = dict(resp.headers.items())
-        if _portkey_enabled():
+        if _truefoundry_enabled():
+            _log_tfy(hdrs, data)
+        elif _portkey_enabled():
             _log_guardrails(hdrs, data)
         return data
 
