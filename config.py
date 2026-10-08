@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     # when OAuth is NOT configured.
     google_oauth_client_id: str = Field(default="", alias="GOOGLE_OAUTH_CLIENT_ID")
     google_oauth_client_secret: str = Field(default="", alias="GOOGLE_OAUTH_CLIENT_SECRET")
+    # Production guardrail: when true, fail boot unless both Google credentials are
+    # present. This prevents a missing secret from silently changing the deployment
+    # from interactive Google OAuth to legacy static-token mode.
+    require_google_oauth: bool = Field(default=False, alias="MCP_REQUIRE_GOOGLE_OAUTH")
     # Comma-separated allowed email domains for signed-in users (server-side gate,
     # in addition to marking the Google OAuth app "Internal" to the Workspace).
     oauth_allowed_domains_raw: str = Field(default="jaipuria.ac.in",
@@ -442,6 +446,12 @@ def validate_config() -> None:
                     "sql/2026-08-26_reporting_readonly_role.sql and the README.")
     elif role:
         log.info("DB key role: %s (non-service_role, least-privilege)", role)
+
+    # Google-only production mode must never silently downgrade to static tokens when
+    # a secret is omitted or fails to reach the container.
+    if settings.require_google_oauth and not settings.oauth_enabled():
+        raise RuntimeError("MCP_REQUIRE_GOOGLE_OAUTH=true requires BOTH "
+                           "GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET")
 
     # OAuth mode: fail-closed on a half-configured setup.
     if settings.google_oauth_client_id or settings.google_oauth_client_secret:

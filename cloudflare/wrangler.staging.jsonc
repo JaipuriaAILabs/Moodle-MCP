@@ -37,6 +37,7 @@
     "OAUTH_ALLOW_CROSS_CLIENT_PKCE": "false",
     "OAUTH_ALLOWED_DOMAINS": "jaipuria.ac.in",
     "OAUTH_DEFAULT_CAMPUSES": "none",
+    "MCP_REQUIRE_GOOGLE_OAUTH": "true",
     "MCP_SERVER_BASE_URL": "https://jaipuria-os-moodle-mcp.ailabs-c94.workers.dev",
     "MCP_ALLOWED_HOSTS": "jaipuria-os-moodle-mcp.ailabs-c94.workers.dev",
     "MCP_IP_RATE_LIMIT": "1200",

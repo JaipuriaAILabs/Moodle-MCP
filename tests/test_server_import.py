@@ -20,7 +20,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Static-token mode (no Google OAuth creds) — the default boot path on a bare env.
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-key")
-for k in ("GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "NEW_RELIC_LICENSE_KEY"):
+for k in ("GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET",
+          "MCP_REQUIRE_GOOGLE_OAUTH", "NEW_RELIC_LICENSE_KEY"):
     os.environ.pop(k, None)
 
 PASS, FAIL = 0, 0
@@ -59,9 +60,10 @@ if imported:
     import fastmcp.server.dependencies as dependencies
 
     original_get_headers = dependencies.get_http_headers
-    original_resolve_principal = server.resolve_principal
+    original_resolve_request_principal = server.resolve_request_principal
     original_create_service = server.create_service
     header_calls = []
+    auth_inputs = []
 
     def fake_get_headers(include_all=False, include=None):
         header_calls.append({"include_all": include_all, "include": include})
@@ -70,10 +72,14 @@ if imported:
         return {"traceparent": "00-00000000000000000000000000000001-0000000000000001-01"}
 
     dependencies.get_http_headers = fake_get_headers
-    server.resolve_principal = lambda token: (
-        {"name": "Regression Admin", "campuses": None, "role": "admin"}
-        if token == "regression-static-token" else None
-    )
+    def fake_resolve_request_principal(headers):
+        auth_inputs.append(headers)
+        return (
+            {"name": "Regression Admin", "campuses": None, "role": "admin"}
+            if headers == {"authorization": "Bearer regression-static-token"} else None
+        )
+
+    server.resolve_request_principal = fake_resolve_request_principal
     server.create_service = lambda principal: SimpleNamespace(principal=principal)
     try:
         service = asyncio.run(server.get_authenticated_service())
@@ -81,13 +87,16 @@ if imported:
             call["include"] and "authorization" in call["include"]
             for call in header_calls
         ))
+        check("only filtered auth headers reach the principal resolver", auth_inputs == [
+            {"authorization": "Bearer regression-static-token"}
+        ])
         check("static bearer resolves inside the tool dependency",
               service.principal["role"] == "admin")
     except Exception as e:  # noqa: BLE001
         check(f"static bearer resolves without raising ({type(e).__name__}: {e})", False)
     finally:
         dependencies.get_http_headers = original_get_headers
-        server.resolve_principal = original_resolve_principal
+        server.resolve_request_principal = original_resolve_request_principal
         server.create_service = original_create_service
 
 print(f"\n{PASS} passed, {FAIL} failed")

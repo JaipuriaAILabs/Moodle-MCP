@@ -185,6 +185,7 @@ boot check on the Supabase vars.
 | `SUPABASE_ANON_KEY` | Gateway key used with the three custom-role JWTs | Supabase → Settings → API |
 | `MCP_TOKENS` | JSON map of faculty tokens → `{name, campuses}` (see below) | You generate it |
 | `MCP_ADMIN_TOKEN` | Single all-campus break-glass token (alternative to `MCP_TOKENS`) | You generate it |
+| `MCP_REQUIRE_GOOGLE_OAUTH` | Production fail-closed guard: require both Google OAuth credentials and never downgrade to static auth | `true` in production |
 | `REPORT_PUBLIC_BASE_URL` | Base for report links (default `https://reports.tryrehearsal.ai`) | — |
 | `MCP_SERVER_BASE_URL` | Public URL of this service (optional) | Render dashboard |
 | `MCP_RATE_LIMIT` | Tool calls allowed per token per window (default `90`) | — |

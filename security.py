@@ -372,6 +372,19 @@ def resolve_oauth_principal():
     return principal_from_claims(claims)
 
 
+def resolve_request_principal(headers: dict | None = None):
+    """Resolve exactly one configured authentication mode.
+
+    Google OAuth mode is deliberately exclusive: a static token must never become a
+    fallback when the OAuth context is absent or invalid. Static tokens remain available
+    only for deployments that have not configured Google OAuth at all.
+    """
+    from config import settings
+    if settings.oauth_enabled():
+        return resolve_oauth_principal()
+    return resolve_principal(bearer_of(headers or {}))
+
+
 # --- bounded sliding-window rate limiter -------------------------------------
 class RateLimiter:
     """Per-key sliding window. Bounded in memory (LRU-evicts idle keys) — OOM-safe."""
@@ -469,7 +482,8 @@ class SecurityHeaders:
                     b"referrer-policy": b"no-referrer",
                     b"strict-transport-security": b"max-age=31536000; includeSubDomains",
                 }
-                if scope.get("path") in ("/mcp", "/token", "/authorize", "/auth/callback"):
+                if scope.get("path") in ("/mcp", "/token", "/authorize", "/consent",
+                                         "/mcp/consent", "/auth/callback"):
                     additions[b"cache-control"] = b"no-store"
                 for key, value in additions.items():
                     if key not in present:
@@ -720,9 +734,9 @@ def build_middleware(rate_limit: int, window: float):
 
     def _principal():
         try:
-            return resolve_oauth_principal() \
-                or resolve_principal(bearer_of(
-                    get_http_headers(include={"authorization"}) or {}))
+            return resolve_request_principal(
+                get_http_headers(include={"authorization"}) or {}
+            )
         except Exception:  # noqa: BLE001 - never let auth-introspection break a call
             return None
 

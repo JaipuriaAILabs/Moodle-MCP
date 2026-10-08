@@ -128,9 +128,20 @@ print("\n[ 3. live GuardMiddleware wiring (patched deps) ]")
 import fastmcp.server.dependencies as _deps  # noqa: E402
 
 # get_http_headers is imported *inside* build_middleware at call time, so patch first.
-_deps.get_http_headers = lambda: {"user-agent": "Harness/1.0", "x-request-id": "req-9",
-                                  "x-forwarded-for": "9.9.9.9, 10.0.0.1"}
-security.resolve_oauth_principal = lambda: PRIN
+def _middleware_headers(include_all=False, include=None):
+    if include and "authorization" in include:
+        return {"authorization": "Bearer ignored-in-oauth-mode"}
+    return {"user-agent": "Harness/1.0", "x-request-id": "req-9",
+            "x-forwarded-for": "9.9.9.9, 10.0.0.1"}
+
+
+_deps.get_http_headers = _middleware_headers
+# Exercise the real production auth branch: OAuth is considered configured only when
+# both Google credentials are present. A patched OAuth resolver alone must not make a
+# nominally-static deployment behave like OAuth.
+_set(google_oauth_client_id="client.apps.googleusercontent.com",
+     google_oauth_client_secret="test-secret")
+security.resolve_request_principal = lambda headers=None: PRIN
 
 CALLS = []
 
