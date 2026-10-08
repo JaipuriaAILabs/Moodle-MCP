@@ -2,8 +2,8 @@
 
 In ENFORCE mode, ``mcp_faculty`` is the authoritative educator allowlist for every
 domain. OFF/SHADOW retain the historical all-campus Jaipuria policy, except that a
-roster student is always self-scoped (when enabled) or denied. ``MCP_FACULTY`` is the
-break-glass override.
+roster student is always self-scoped (when enabled) or denied. ``MCP_FACULTY`` is a
+legacy override outside ENFORCE mode and is ignored in production enforcement.
 
 Threat model notes:
 * An explicit educator grant is checked before student classification, so an admin-
@@ -65,18 +65,41 @@ def _fetch_faculty_row(email: str):
     return rows[0] if rows else None
 
 
+def _fetch_student_rows(email: str, columns: str):
+    """Resolve roster rows through the narrow identity RPC when deployed.
+
+    The RPC remains callable after student-data RLS becomes fail-closed, avoiding
+    a circular dependency where the app needs a student scope before it can learn
+    the signed-in student's own IDs. During the staged rollout, PGRST202 means the
+    migration is not installed yet, so the legacy literal-email SELECT is retained.
+    Any other RPC error propagates and fails closed; it never silently downgrades.
+    """
+    try:
+        rows = (_sb().rpc("resolve_mcp_student_identity", {"p_email": email})
+                .execute()).data or []
+        return rows
+    except Exception as exc:  # noqa: BLE001 - compatibility gate is exact by error code
+        if getattr(exc, "code", None) != "PGRST202":
+            raise
+    return (_sb().table("students").select(columns)
+            .ilike("student_email", _ilike_literal(email)).order("batch", desc=True)
+            .execute()).data or []
+
+
 def _fetch_student_hit(email: str) -> bool:
-    rows = (_sb().table("students").select("student_id")
-            .ilike("student_email", _ilike_literal(email)).limit(1).execute()).data
-    return bool(rows)
+    return bool(_fetch_student_rows(email, "student_id"))
 
 
 def _fetch_student_identity(email: str):
     # Return ALL roster rows for this email: one person may hold more than one enrolment id
     # (e.g. across programs/campuses), and the email also repeats across run snapshots. Newest
     # batch first, so row[0] is the primary; the caller dedupes by student_id.
-    return (_sb().table("students").select("student_id,campus,batch")
-            .ilike("student_email", _ilike_literal(email)).order("batch", desc=True).execute()).data or []
+    return _fetch_student_rows(email, "student_id,student_name,campus,batch")
+
+
+def _name_key(value) -> str:
+    """Conservative roster-name normalisation for shared-email detection."""
+    return "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
 
 
 def _copy_ident(d):
@@ -108,6 +131,15 @@ def student_identity(email: str):
     if not rows:
         _student_ids.set(email, _ID_MISS)
         return None
+    # If one Google email maps to materially different student names, ownership is
+    # ambiguous. Deny the entire identity instead of combining two people's IDs.
+    names = {_name_key(r.get("student_name")) for r in rows if _name_key(r.get("student_name"))}
+    if len(names) > 1:
+        log.error("student email maps to multiple roster identities for subject=%s — denying",
+                  _subject(email))
+        _student_ids.set(email, _ID_MISS)
+        return None
+
     ids, campuses, batches = [], [], []
     for r in rows:  # rows are batch-desc, so the first distinct id/batch is the primary
         sid = (r.get("student_id") or "").strip()

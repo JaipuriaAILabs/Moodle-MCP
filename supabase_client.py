@@ -1,9 +1,12 @@
-"""Read-only, campus-scoped data-access layer for the Moodle Reports MCP.
+"""Read-only, principal-scoped data-access layer for the Moodle Reports MCP.
 
 Unlike the student MCP (per-user RLS), report data is institutional, so a single bounded
 supabase client is reused process-wide; the tenant boundary is the token's allowed-campus set,
-applied by every tool. Service role key stays server-side and is never exposed to the host.
+applied by every tool. Each request builder also carries an internal ``X-MCP-Scope`` header;
+the database RLS migration consumes the same scope as a defense-in-depth boundary. The DB
+credential stays server-side and is never exposed to the host.
 """
+import json
 import logging
 
 from supabase import Client, create_client
@@ -15,6 +18,8 @@ log = logging.getLogger(__name__)
 
 _run_cache = TTLCache(maxsize=64, ttl=300)
 _client_singleton: Client | None = None
+_SCOPE_HEADER = "X-MCP-Scope"
+_MAX_SCOPE_HEADER_BYTES = 2048
 
 
 def _client() -> Client:
@@ -42,11 +47,84 @@ def _client() -> Client:
     return _client_singleton
 
 
+def db_scope_for_principal(principal: dict) -> dict:
+    """Return the compact, non-PII scope contract sent to PostgREST.
+
+    The database branches on ``kind``: student scopes are matched by enrolment ID
+    only, while staff scopes are matched by campus. Keeping those branches mutually
+    exclusive prevents the classic bug where a student's campus claim accidentally
+    authorizes every peer in that campus.
+    """
+    role = str(principal.get("role") or "").strip().lower()
+    if role == "student":
+        ids = sorted({str(v).strip() for v in (principal.get("student_ids") or [])
+                      if str(v).strip()})
+        if not ids and principal.get("student_id"):
+            ids = [str(principal["student_id"]).strip()]
+        campuses = sorted({str(v).strip().lower() for v in (principal.get("campuses") or [])
+                           if str(v).strip()})
+        batches = sorted({str(v).strip() for v in (principal.get("batches") or [])
+                          if str(v).strip()})
+        if ids and campuses and batches:
+            return {"v": 1, "kind": "student", "role": "student",
+                    "student_ids": ids, "campuses": campuses, "batches": batches}
+        return {"v": 1, "kind": "deny", "role": "student"}
+
+    if role == "pending":
+        return {"v": 1, "kind": "deny", "role": "pending"}
+
+    campuses = principal.get("campuses")
+    effective_role = role or ("cross_campus" if campuses is None else "faculty")
+    staff_roles = {"admin", "cross_campus", "campus_admin", "faculty", "viewer"}
+    if effective_role not in staff_roles:
+        return {"v": 1, "kind": "deny", "role": effective_role or "unknown"}
+    if campuses is None:
+        if effective_role not in {"admin", "cross_campus"}:
+            return {"v": 1, "kind": "deny", "role": effective_role}
+        return {"v": 1, "kind": "staff", "role": effective_role, "all": True}
+    allowed = sorted({str(v).strip().lower() for v in campuses if str(v).strip()})
+    if effective_role in {"admin", "cross_campus"}:
+        return {"v": 1, "kind": "deny", "role": effective_role}
+    if not allowed:
+        return {"v": 1, "kind": "deny", "role": effective_role}
+    return {"v": 1, "kind": "staff", "role": effective_role, "campuses": allowed}
+
+
+class _ScopedClient:
+    """Per-principal view over the shared Supabase client.
+
+    ``table()`` returns a fresh request builder, so adding the scope header there
+    cannot race with another principal or mutate the process-wide client's headers.
+    The underlying HTTP session remains shared for connection pooling.
+    """
+
+    def __init__(self, raw: Client, scope: dict):
+        self._raw = raw
+        self.scope = dict(scope)
+        self.scope_header = json.dumps(scope, separators=(",", ":"), sort_keys=True)
+        if len(self.scope_header.encode("utf-8")) > _MAX_SCOPE_HEADER_BYTES:
+            raise ValueError("principal database scope is too large")
+
+    def table(self, name: str):
+        builder = self._raw.table(name)
+        headers = dict(getattr(builder, "headers", {}) or {})
+        headers[_SCOPE_HEADER] = self.scope_header
+        builder.headers = headers
+        return builder
+
+    def rpc(self, name: str, params=None):
+        builder = self._raw.rpc(name, params or {})
+        request = getattr(builder, "request", None)
+        if request is None:
+            raise RuntimeError("Supabase RPC builder does not expose request headers")
+        request.headers[_SCOPE_HEADER] = self.scope_header
+        return builder
+
+
 class MoodleService:
     """Per-request handle: the shared client + this caller's campus scope."""
 
     def __init__(self, client: Client, principal: dict):
-        self.client = client
         self.principal = principal
         campuses = principal.get("campuses")
         self.allowed_campuses = (
@@ -77,6 +155,11 @@ class MoodleService:
         self.self_batch = (
             (str(principal.get("batch") or "").strip() or None) if self.self_student_ids else None
         )
+        # Every PostgREST query now carries the exact same effective scope used by
+        # the application filters. Before the RLS migration this header is inert;
+        # after cutover, a missing/malformed header denies at the database boundary.
+        self.db_scope = db_scope_for_principal(principal)
+        self.client = _ScopedClient(client, self.db_scope)
 
     def apply_student(self, query, col: str = "student_id"):
         """Bound a query to the caller's own enrolment id(s) when they are a student; no-op

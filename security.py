@@ -23,6 +23,45 @@ MSG_RATE = "Rate limit exceeded — please slow down and retry shortly."
 MSG_ERROR = "This query could not be completed right now. Please retry."
 MSG_AUDIT = "The audit service is unavailable, so this request was not executed. Please retry."
 
+# Students get a deliberately small, self-only tool surface. The row filters remain
+# the data boundary, but this allowlist removes cohort/roster/admin endpoints entirely
+# from a student session, shrinking the blast radius of any future query regression.
+# New tools fail closed for students until they are explicitly reviewed and added here.
+STUDENT_SELF_TOOLS = frozenset({
+    "whoami",
+    "get_student",
+    "student_marks",
+    "student_attendance",
+    "student_trajectory",
+    "student_360",
+    "get_student_report",
+    "create_report",
+    "get_report_job",
+    "resolve_identities",
+})
+
+# An unprovisioned educator may identify themselves and file an access request, but
+# cannot touch data or inspect the approval queue. New tools also fail closed here.
+PENDING_TOOLS = frozenset({"whoami", "request_access"})
+
+
+def tool_allowed_for_principal(tool: str, principal) -> bool:
+    """Class-level tool entitlement gate.
+
+    Campus/student row filters still apply inside each allowed tool; this is an
+    independent deny-by-default layer for the two restricted session classes.
+    Educator/admin roles retain the existing full tool surface, with capability
+    checks such as ``can_generate`` enforced by the tool itself.
+    """
+    if not isinstance(principal, dict):
+        return False
+    role = str(principal.get("role") or "").strip().lower()
+    if role == "student":
+        return tool in STUDENT_SELF_TOOLS
+    if role == "pending":
+        return tool in PENDING_TOOLS
+    return True
+
 
 def quiet_noisy_loggers() -> None:
     """Cap third-party HTTP client loggers at WARNING. At INFO, httpx logs every
@@ -249,7 +288,7 @@ def _claim_true(value) -> bool:
 
 def principal_from_claims(claims: dict):
     """Resolve a verified Google identity to a principal (or None = deny), governed by
-    MCP_RBAC_MODE. OFF (default): verified Jaipuria accounts get all-campus access, the
+    MCP_RBAC_MODE. OFF: verified Jaipuria accounts get all-campus access, the
     historical policy. SHADOW: same served access, but the would-be enforced grant is
     logged. ENFORCE: the mcp_faculty registry is authoritative for educators (role + campus
     scope); students are self-scoped when enabled and denied otherwise; unlisted accounts
@@ -782,6 +821,14 @@ def build_middleware(rate_limit: int, window: float):
                     err = "rate_limited"
                     raise ToolError(MSG_RATE)
                 try:
+                    # Class-level deny-by-default gate. Student sessions may call only
+                    # explicitly reviewed self-only tools; pending sessions may only
+                    # identify themselves and request access. Keep this immediately
+                    # before the handler so denied attempts are still rate-limited and
+                    # captured in the audit ledger below.
+                    if isinstance(principal, dict) \
+                            and not tool_allowed_for_principal(name, principal):
+                        raise PermissionError("tool is not permitted for this role")
                     result = await call_next(context)
                     # The call succeeded — lock in the outcome BEFORE the audit write so a
                     # (defensive) audit failure can never be re-caught below and reported to

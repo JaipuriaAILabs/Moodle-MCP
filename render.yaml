@@ -100,7 +100,10 @@ services:
       - key: MCP_CAMPUSES
         value: noida,lucknow,jaipur,indore
       - key: MCP_STUDENT_SELF_ACCESS
-        value: "false"
+        # Student identities resolve from the roster and are restricted to the
+        # reviewed self-only tool allowlist + their own enrolment IDs. Any lookup
+        # failure denies; it never falls through to educator/campus access.
+        value: "true"
       - key: MCP_SELF_SERVICE_ACCESS
         value: "false"
       # Optional identity-free access-request relay. Configure both values together;

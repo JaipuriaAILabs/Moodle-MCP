@@ -199,10 +199,9 @@ class Settings(BaseSettings):
 
     def access_email_enabled(self) -> bool:
         return bool(self.access_request_email_to.strip() and self.smtp_host.strip())
-    # Student self-access: when on, a student (roster email) gets a session hard-bounded to
-    # their OWN student_id — same tools, but every query is filtered to self, so one student
-    # can never see another's data. Default OFF (students denied entirely) so this sensitive
-    # activation is a deliberate env flip (MCP_STUDENT_SELF_ACCESS=true), like the RBAC modes.
+    # Student self-access: when on, a roster student gets a session hard-bounded to
+    # their OWN enrolment id(s) and a small self-only tool allowlist. Default OFF is
+    # fail-safe for new deployments; production explicitly enables it in render.yaml.
     student_self_access: bool = Field(default=False, alias="MCP_STUDENT_SELF_ACCESS")
     # LLM-blind PII: when on, tool results expose an opaque, deterministic `student_ref`
     # (HMAC token) for each student instead of the name/enrolment id, plus a stripped

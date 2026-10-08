@@ -66,14 +66,15 @@ rehearsal "student MCP", which already uses per-user RLS). Design:
 
 - **Self-scope key:** the caller's own `student_id` (from classification). Every student query is filtered
   to that id — never a campus set.
-- **Self-bound tool behaviour (implemented):** students currently see the same tool names as educators,
-  but every student-bearing query is forced to their own `student_id`. A student passing another id gets
-  no other-student result, and `create_report` replaces the supplied target with the caller's own id.
-  Roster/cohort tools therefore collapse to the caller's own row rather than exposing classmates. If a
-  smaller `my_*`-only discovery surface is still desired for UX, add it separately; it is not the security
-  boundary.
-- **DB defense-in-depth:** per-student RLS so even a server bug can't return another student's rows
-  (mirrors the rehearsal student MCP). This needs per-request identity context at the DB (see §7).
+- **Self-bound tool behaviour (implemented):** students can call only the reviewed self-service tool
+  allowlist. Cohort, roster, risk, campus-summary, access-management, and admin tools are denied before
+  their handlers execute. Every allowed student query is also forced to the caller's own `student_id`;
+  a supplied peer id returns no result, and `create_report` replaces the target with the caller's id.
+- **DB defense-in-depth (staged):** the MCP carries a compact signed-session-derived `X-MCP-Scope`
+  header to PostgREST. The staged fail-closed RLS policies authorize either exact student ids or staff
+  campus scope, never both. See `sql/2026-10-08_mcp_scope_contract.sql` and
+  `sql/2026-10-08_mcp_scope_rls_enforce.sql`; activate them through the canary gates in
+  `docs/RBAC_ENFORCEMENT_EXECUTION_PLAN.md`.
 - **PII:** a student sees their *own* name (it's theirs) in the rehydrated output, but the LLM still gets
   only a token (rule 3 applies to everyone).
 
@@ -122,22 +123,23 @@ small-n together where avoidable.
 
 ## 7. Enforcement layers
 
-- **App layer (built):** campus scope for educators; add owner-scope for students; class-based tool gating.
-- **DB layer (defense-in-depth):** educator **campus RLS** (`RBAC_HARDENING_PLAN §7`) + student
-  **per-student RLS**. Both need the caller's identity/scope carried to the DB per request
-  (`SET LOCAL request.*` GUC, or a per-request scoped JWT) — the one change that touches the connection
-  model. Schedule after the app-layer student path is stable.
+- **App layer (built):** campus scope for educators, owner scope plus class-based tool gating for students.
+- **DB layer (staged defense-in-depth):** the MCP now carries request scope to PostgREST without mutating
+  global client state. The two-stage migration first installs and probes the scope contract, then removes
+  legacy read-all policies and enables fail-closed student-id/campus RLS. Activation requires the staged
+  canary and rollback procedure in `RBAC_ENFORCEMENT_EXECUTION_PLAN.md`.
 
 ---
 
-## 8. Current build status (refreshed 2026-10-01)
+## 8. Current build status (refreshed 2026-10-08)
 
-**Built, dormant-safe:** Google-only auth; educator campus scoping; roles faculty/campus_admin/
+**Built:** Google-only auth; educator campus scoping; roles faculty/campus_admin/
 cross_campus(director)/admin/viewer; self-service `request_access` + approval; `mcp_faculty` hardened;
-student classification + `student_id` row-owner and batch boundaries. Student access remains off until
-`MCP_STUDENT_SELF_ACCESS=true`. Students currently use the same tool names as educators, but every
-student-bearing query is forced through `MoodleService.apply_student()` and `create_report` replaces
-any supplied target with the caller's own id. The 2026-10-01 isolation audit also closed direct-query
+student classification + `student_id` row-owner and batch boundaries. Students have a strict self-tool
+allowlist; all other tools are denied before execution. Every student-bearing query is forced through
+`MoodleService.apply_student()`, and `create_report` replaces any supplied target with the caller's own
+id. The production manifest enables this path explicitly while the code default remains fail-safe off.
+The 2026-10-01 isolation audit also closed direct-query
 holes in roster, enrolment counts, report availability, cached narratives, and declining-student name
 lookups. An explicit educator grant wins for a legitimate dual-role student/TA in every RBAC mode.
 Every audit event now retains identity-free role/effective-scope/self-bound facts, shadow decisions
@@ -151,13 +153,13 @@ remains the only place where requester identity is disclosed. Receiver verificat
   `resolve_identities` tool; generalise the create_report name-omission pattern.
 - **P2 — LLM-blind PII (harness side, AIA-1356/Rajika):** strip/substitute/rehydrate around the model.
   P1 alone is not a privacy boundary because the MCP cannot rehydrate the model's response.
-- **D1 — DB RLS:** per-student + per-campus RLS (defense-in-depth). The application boundary is active;
-  the shared read-only database credential can still read all campuses if application filtering regresses.
+- **D1 — DB RLS activation:** the request-scope transport and fail-closed migrations are implemented;
+  apply stage A, pass the scope canary, then apply stage B. Until stage B is applied, the application
+  boundary is active but the shared read-only credential can still read all campuses.
 
-**Still to activate/verify operationally:** seed/approve educator grants, complete the shadow review,
-flip `MCP_RBAC_MODE=enforce`, decide whether to enable `MCP_STUDENT_SELF_ACCESS`, update/publish the
-privacy notice, and run two-user cross-campus plus two-student isolation smokes against the deployed
-service. Repository state cannot prove those live-environment steps.
+**Still to activate/verify operationally:** apply the two-stage RLS rollout, deploy the production manifest,
+update/publish the privacy notice, and run the exact live student, dean, and cross-campus smoke matrix.
+Repository state cannot prove those live-environment steps.
 
 Suggested next build order: **P1 + P2 together** (so pseudonymization is end-to-end), then **D1**.
 P2 requires the harness source, which is not present in either attached repository; do not ship
@@ -167,9 +169,9 @@ P1 alone and call it a privacy boundary. Keep each change flag-gated through sha
 
 ## 9. Open decisions
 
-1. **Do students use this MCP directly, or a separate student surface?** (Current build assumes the same
-   MCP with a self-bound student class. A smaller `my_*` discovery surface or a separate server remains
-   a UX/product choice, not the row-isolation boundary.)
+1. **Do students use this MCP directly, or a separate student surface?** (Current build uses the same
+   MCP with a strict self-tool allowlist and self-bound student class. A separate server remains a
+   UX/product choice, not the row-isolation boundary.)
 2. **Token reversibility scope:** per-request ephemeral map (safest, no stored name↔token) vs a stable
    stored pseudonym table (enables cross-session analytics on tokens). Recommend per-request ephemeral.
 3. **Ping destination:** choose the approved relay/channel and configure the signed, identity-free webhook.
