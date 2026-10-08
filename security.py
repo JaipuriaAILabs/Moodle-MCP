@@ -721,7 +721,8 @@ def build_middleware(rate_limit: int, window: float):
     def _principal():
         try:
             return resolve_oauth_principal() \
-                or resolve_principal(bearer_of(get_http_headers() or {}))
+                or resolve_principal(bearer_of(
+                    get_http_headers(include={"authorization"}) or {}))
         except Exception:  # noqa: BLE001 - never let auth-introspection break a call
             return None
 
@@ -730,7 +731,7 @@ def build_middleware(rate_limit: int, window: float):
         # tokens that happen to share a name must not share a rate budget. The
         # hash keeps raw tokens out of the in-memory limiter map.
         try:
-            tok = bearer_of(get_http_headers() or {})
+            tok = bearer_of(get_http_headers(include={"authorization"}) or {})
             return hashlib.sha256(tok.encode()).hexdigest()[:16] if tok else "anon"
         except Exception:  # noqa: BLE001
             return "anon"
