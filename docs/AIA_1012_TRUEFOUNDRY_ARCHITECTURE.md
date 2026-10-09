@@ -60,11 +60,13 @@ only by the server-side report agent, never by interactive users.
 
 ## Activation gates
 
-Repository manifests cover the remote server, both virtual servers, rate limits and trace access.
-Tenant resources that need secrets, provider accounts or generated tool names cannot be safely
-fabricated in Git. A tenant administrator must complete these after a dry run:
+Repository manifests cover the remote server, both virtual servers, rate limits, trace access,
+Cedar authorization, PII/secret/prompt-injection guardrail definitions, and their policy binding.
+Tenant resources that need secret values, provider accounts or generated tool names cannot be
+safely fabricated in Git. A tenant administrator must complete these after a dry run:
 
-1. Attach the Cedar pre-tool and PII/Prompt Injection/Secrets post-tool policies.
+1. Store the gateway-to-origin secret in TrueFoundry and Cloudflare, then enable origin enforcement
+   only after a successful gateway canary.
 2. Copy the exact encoded staff `create_report` tool name into the one-execution approval rule.
 3. Configure the report virtual model with a reviewed secondary provider and SLA cutoff.
 4. Connect separate body-free OpenTelemetry trace and metric exporters.

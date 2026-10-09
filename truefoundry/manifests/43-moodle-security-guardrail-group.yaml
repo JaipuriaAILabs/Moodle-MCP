@@ -1,0 +1,24 @@
+{
+  "type": "provider-account/guardrail-config-group",
+  "name": "moodle-security",
+  "integrations": [
+    {
+      "name": "secrets",
+      "description": "Redacts likely credentials and secrets from MCP tool results before they are returned to clients.",
+      "type": "integration/guardrail-config/secret-detection",
+      "operation": "mutate",
+      "priority": 2,
+      "enforcing_strategy": "enforce",
+      "config": {
+        "redaction_text": "[REDACTED]"
+      }
+    },
+    {
+      "name": "prompt-injection",
+      "description": "Blocks prompt-injection content originating in Moodle data or tool output.",
+      "type": "integration/guardrail-config/tfy-prompt-injection",
+      "operation": "validate",
+      "enforcing_strategy": "enforce"
+    }
+  ]
+}

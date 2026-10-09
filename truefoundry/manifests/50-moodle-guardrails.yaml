@@ -1,0 +1,41 @@
+{
+  "name": "moodle-mcp-guardrails",
+  "type": "gateway-guardrails-config",
+  "rules": [
+    {
+      "id": "moodle-mcp-tool-boundary",
+      "when": {
+        "target": {
+          "operator": "or",
+          "conditions": {
+            "mcpServers": {
+              "values": [
+                "jaipuria-moodle-prod",
+                "jaipuria-moodle-student",
+                "jaipuria-moodle-staff"
+              ],
+              "condition": "in"
+            }
+          }
+        },
+        "subjects": {
+          "operator": "and",
+          "conditions": {
+            "in": ["team:everyone"]
+          }
+        }
+      },
+      "llm_input_guardrails": [],
+      "llm_output_guardrails": [],
+      "mcp_tool_pre_invoke_guardrails": [
+        "moodle-access/cedar-rbac"
+      ],
+      "mcp_tool_post_invoke_guardrails": [
+        "moodle-pii/pii-redaction",
+        "moodle-security/secrets",
+        "moodle-security/prompt-injection"
+      ],
+      "custom_error_message": "This Moodle action was blocked by an institutional data-protection policy."
+    }
+  ]
+}

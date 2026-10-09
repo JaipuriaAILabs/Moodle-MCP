@@ -59,6 +59,9 @@ wrangler secret put OAUTH_REDIRECT_HOSTS
 wrangler secret put MCP_AUDIT_HMAC_KEY
 wrangler secret put MCP_PII_HMAC_KEY            # mandatory: committed prod/staging mode is enforce
 
+# TrueFoundry MCP Gateway -> origin trust (set before GATEWAY_ENFORCED=true)
+wrangler secret put GATEWAY_SHARED_SECRET
+
 # Optional — set only if the feature is on
 wrangler secret put MCP_REDIS_URL                   # only if scaling >1 instance
 wrangler secret put NEW_RELIC_LICENSE_KEY           # turns on OTel → New Relic EU
@@ -74,20 +77,24 @@ wrangler secret put MCP_ACCESS_REQUEST_WEBHOOK_SECRET
 cd cloudflare
 npm install
 wrangler login                      # must land on the ailabs@jaipuria.ac.in account
-# 1) Staging on workers.dev first (comment out the custom-domain route, or use `--route`):
-wrangler deploy                     # → jaipuria-os-moodle-mcp.<subdomain>.workers.dev
+# 1) Staging on workers.dev first:
+wrangler deploy -c wrangler.staging.jsonc
 ```
 Test on the staging URL **before** touching DNS:
 - **Claude.ai connector:** connect → list tools → one read tool + one `create_report`.
 - **Jaipuria OS:** Gatekeepers → MCP Server → + → staging `/mcp` → sign in → one tool call.
 - **Two-faculty cross-campus** parity: confirm campus scoping matches Render exactly.
+- **Gateway canary:** TrueFoundry can initialize and call `whoami` while
+  `GATEWAY_ENFORCED=false`.
 
 Then cut over:
-1. Re-enable the `routes` custom-domain in `wrangler.jsonc` (or add the custom domain in the dash) and
-   `wrangler deploy`. If `tryrehearsal.ai` is **not** a zone on this CF account, instead CNAME
-   `moodle-mcp` → the `workers.dev` hostname as an interim and note it on the ticket.
-2. Keep the Render service **paused-ready for 7 days** as rollback, then delete it and note the date on AIA-1391.
-3. Enable Workers Logs; confirm tool calls + OAuth errors are visible (replaces Render logs). New Relic
+1. Store the same generated `GATEWAY_SHARED_SECRET` in TrueFoundry and Cloudflare. Configure the
+   remote MCP's `x-mcp-gateway-secret` additional header from TrueFoundry Secret Manager.
+2. Confirm a gateway `whoami` canary, set `GATEWAY_ENFORCED=true` in `wrangler.jsonc`, and deploy.
+   A direct headerless `/mcp` initialize must then return `403 gateway_required`; the TrueFoundry
+   virtual endpoints must remain healthy.
+3. Keep the prior container version available for immediate rollback during the observation window.
+4. Enable Workers Logs; confirm tool calls + OAuth errors are visible (replaces Render logs). New Relic
    OTel still exports from inside the container if `NEW_RELIC_LICENSE_KEY` is set.
 
 ## Acceptance checks (AIA-1391)
@@ -98,8 +105,9 @@ curl -s https://moodle-mcp.rehearsal-os.app/.well-known/oauth-authorization-serv
 # cold initialize < 2s; all 3 consumers connect AFTER re-pointing to the new host (hostname changed)
 ```
 
-## Still to confirm with Rajika
-- Containers vs TS port (this scaffold assumes **Containers**).
-- `instance_type` + whether `max_instances: 1` + keepalive meets `<2s` cold in practice (else revisit TS port).
-- Is `tryrehearsal.ai` a zone on this CF account (custom domain) or CNAME interim?
-- Workers **Paid** plan active before deploy.
+## Production checks that still require the tenant owner
+
+- The authenticated Cloudflare profile must belong to Jaipuria and own account
+  `c945945018f732e5607a331ef73c7d75`; never authorize the old Synlex profile.
+- Confirm the Workers plan supports Containers and that `standard-1`, `max_instances: 1`, and the
+  keepalive meet the measured concurrency and cold-start SLO.
