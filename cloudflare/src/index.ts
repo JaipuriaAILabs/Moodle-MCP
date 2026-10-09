@@ -36,6 +36,9 @@ const CONTAINER_ENV_KEYS = [
   // RBAC / access
   "MCP_RBAC_MODE", "MCP_CAMPUSES", "MCP_STUDENT_SELF_ACCESS", "MCP_SELF_SERVICE_ACCESS",
   "MCP_ACCESS_REQUEST_WEBHOOK_URL", "MCP_ACCESS_REQUEST_WEBHOOK_SECRET", "MCP_FACULTY",
+  // TrueFoundry gateway -> origin trust. Without forwarding these values the
+  // Python boundary would silently stay disabled even when Wrangler has them.
+  "GATEWAY_ENFORCED", "GATEWAY_SHARED_SECRET",
   // Report generation (create_report → moodle-agent)
   "AGENT_API_BASE", "AGENT_SHARED_SECRET", "AGENT_REPORT_QUEUE", "REPORT_PUBLIC_BASE_URL",
   // In-server PII redaction (shipped flag-gated)

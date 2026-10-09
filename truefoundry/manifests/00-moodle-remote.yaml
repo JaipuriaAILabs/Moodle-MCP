@@ -43,6 +43,7 @@
   "auth_data": {
     "type": "oauth2",
     "grant_type": "authorization_code",
+    "provider": "custom",
     "authorization_url": "https://moodle-mcp.rehearsal-os.app/authorize",
     "token_url": "https://moodle-mcp.rehearsal-os.app/token",
     "registration_url": "https://moodle-mcp.rehearsal-os.app/register",
@@ -54,6 +55,7 @@
       "https://www.googleapis.com/auth/userinfo.profile"
     ]
   },
+  "collaborators": [],
   "tags": {
     "application": "moodle-mcp",
     "environment": "production",

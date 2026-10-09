@@ -1,0 +1,27 @@
+{
+  "type": "provider-account/guardrail-config-group",
+  "name": "moodle-pii",
+  "integrations": [
+    {
+      "name": "pii-redaction",
+      "description": "Redacts personal identity, contact, location and India-specific identity data that reaches the gateway despite source-side pseudonymization.",
+      "type": "integration/guardrail-config/tfy-pii",
+      "operation": "mutate",
+      "priority": 1,
+      "enforcing_strategy": "enforce",
+      "config": {
+        "pii_categories": [
+          "Person",
+          "Address",
+          "Email",
+          "PhoneNumber",
+          "IPAddress",
+          "INPermanentAccountNumber",
+          "INUniqueIdentificationNumber",
+          "CreditCardNumber",
+          "BankAccountNumber"
+        ]
+      }
+    }
+  ]
+}

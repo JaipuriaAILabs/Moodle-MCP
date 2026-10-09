@@ -65,10 +65,14 @@
     "MCP_CAPTURE_CLIENT_IP": "true",
     "MCP_CAPTURE_ARGS_MAX_BYTES": "32768",
     "MCP_CAPTURE_RESULT_MAX_BYTES": "262144",
-    "MCP_RBAC_MODE": "off",
+    "MCP_RBAC_MODE": "enforce",
     "MCP_CAMPUSES": "noida,lucknow,jaipur,indore",
-    "MCP_STUDENT_SELF_ACCESS": "false",
-    "MCP_SELF_SERVICE_ACCESS": "true",
+    "MCP_STUDENT_SELF_ACCESS": "true",
+    "MCP_SELF_SERVICE_ACCESS": "false",
+    // Keep false until the same strong secret is installed in TrueFoundry and
+    // Cloudflare and a gateway canary succeeds. The production cutover changes
+    // only this flag; config.py refuses to boot if the secret is missing/weak.
+    "GATEWAY_ENFORCED": "false",
     "AGENT_REPORT_QUEUE": "true",
     "REPORT_PUBLIC_BASE_URL": "https://reports.tryrehearsal.ai",
     "MCP_PII_REDACTION_MODE": "enforce"

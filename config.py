@@ -542,6 +542,17 @@ def validate_config() -> None:
             raise RuntimeError("MCP_PII_HMAC_KEY must be at least 32 characters when PII "
                                "redaction is enabled")
 
+    # Once the public endpoint is placed behind TrueFoundry, boot must fail before
+    # serving traffic if the independent gateway-to-origin credential is absent or
+    # weak. GatewayEnforce already fails closed per request; this turns a deployment
+    # mistake into an immediate, observable startup failure instead of a blanket 403.
+    if settings.gateway_enforced:
+        gateway_secrets = settings.gateway_secrets()
+        if not gateway_secrets:
+            raise RuntimeError("GATEWAY_ENFORCED=true requires GATEWAY_SHARED_SECRET")
+        if any(len(secret) < 32 for secret in gateway_secrets):
+            raise RuntimeError("every GATEWAY_SHARED_SECRET value must be at least 32 characters")
+
     # Warn — never brick a running service — on low-entropy crypto secrets.
     for _kname, _kval in (("OAUTH_JWT_SIGNING_KEY", settings.oauth_jwt_signing_key),
                           ("OAUTH_STORAGE_ENCRYPTION_KEY", settings.oauth_storage_encryption_key),

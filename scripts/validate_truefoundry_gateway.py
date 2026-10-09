@@ -93,9 +93,9 @@ def validate() -> None:
     assert auth["registration_url"].endswith("/register")
     assert auth["jwt_source"] == "access_token"
     assert auth["code_challenge_methods_supported"] == ["S256"]
-    assert "provider" not in auth and "include_resource" not in auth
+    assert auth["provider"] == "custom" and "include_resource" not in auth
     assert "headers" not in auth, "interactive users must never share an upstream bearer"
-    assert "collaborators" not in remote, "end users must use curated virtual servers"
+    assert remote["collaborators"] == [], "end users must use curated virtual servers"
 
     student = _load("10-moodle-student-virtual.yaml")
     assert student["type"] == "mcp-server/virtual"
@@ -147,7 +147,81 @@ def validate() -> None:
     assert set(admin["data_types"]) == {"traces", "metrics"}
     assert admin["scope"] == "all_data" and admin["enabled"] is True
 
+    access_group = _load("41-moodle-access-guardrail-group.yaml")
+    assert access_group["type"] == "provider-account/guardrail-config-group"
+    assert access_group["name"] == "moodle-access"
+    assert len(access_group["integrations"]) == 1
+    cedar = access_group["integrations"][0]
+    assert cedar["name"] == "cedar-rbac"
+    assert cedar["type"] == "integration/guardrail-config/cedar"
+    assert cedar["operation"] == "validate"
+    assert cedar["enforcing_strategy"] == "enforce"
+    assert 'MCPServer::"jaipuria-moodle-student"' in cedar["config"]["policy"]
+    assert 'MCPServer::"jaipuria-moodle-staff"' in cedar["config"]["policy"]
+
+    pii_group = _load("42-moodle-pii-guardrail-group.yaml")
+    assert pii_group["type"] == "provider-account/guardrail-config-group"
+    assert pii_group["name"] == "moodle-pii"
+    assert len(pii_group["integrations"]) == 1
+    pii = pii_group["integrations"][0]
+    assert pii["name"] == "pii-redaction"
+    assert pii["type"] == "integration/guardrail-config/tfy-pii"
+    assert pii["operation"] == "mutate"
+    assert pii["enforcing_strategy"] == "enforce"
+    assert {
+        "Person",
+        "Address",
+        "Email",
+        "PhoneNumber",
+        "IPAddress",
+        "INPermanentAccountNumber",
+        "INUniqueIdentificationNumber",
+        "CreditCardNumber",
+        "BankAccountNumber",
+    } <= set(pii["config"]["pii_categories"])
+
+    security_group = _load("43-moodle-security-guardrail-group.yaml")
+    assert security_group["type"] == "provider-account/guardrail-config-group"
+    assert security_group["name"] == "moodle-security"
+    security_integrations = {
+        integration["name"]: integration
+        for integration in security_group["integrations"]
+    }
+    secrets = security_integrations["secrets"]
+    assert secrets["type"] == "integration/guardrail-config/secret-detection"
+    assert secrets["operation"] == "mutate"
+    assert secrets["enforcing_strategy"] == "enforce"
+    prompt_injection = security_integrations["prompt-injection"]
+    assert prompt_injection["type"] == "integration/guardrail-config/tfy-prompt-injection"
+    assert prompt_injection["operation"] == "validate"
+    assert prompt_injection["enforcing_strategy"] == "enforce"
+
+    guardrails = _load("50-moodle-guardrails.yaml")
+    assert guardrails["type"] == "gateway-guardrails-config"
+    assert guardrails["name"] == "moodle-mcp-guardrails"
+    assert len(guardrails["rules"]) == 1
+    rule = guardrails["rules"][0]
+    targets = rule["when"]["target"]["conditions"]["mcpServers"]
+    assert targets["condition"] == "in"
+    assert set(targets["values"]) == {
+        "jaipuria-moodle-prod",
+        "jaipuria-moodle-student",
+        "jaipuria-moodle-staff",
+    }
+    assert rule["when"]["subjects"]["conditions"]["in"] == ["team:everyone"]
+    assert rule["llm_input_guardrails"] == []
+    assert rule["llm_output_guardrails"] == []
+    assert rule["mcp_tool_pre_invoke_guardrails"] == ["moodle-access/cedar-rbac"]
+    assert set(rule["mcp_tool_post_invoke_guardrails"]) == {
+        "moodle-pii/pii-redaction",
+        "moodle-security/secrets",
+        "moodle-security/prompt-injection",
+    }
+
     policy = POLICY.read_text(encoding="utf-8")
+    assert cedar["config"]["policy"].strip() == "\n".join(
+        line for line in policy.splitlines() if not line.lstrip().startswith("//")
+    ).strip()
     assert 'resource == MCPServer::"jaipuria-moodle-prod"' in policy
     for email in APPROVED_STAFF:
         assert f'"{email}"' in policy

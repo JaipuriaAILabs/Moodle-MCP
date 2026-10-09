@@ -1,14 +1,19 @@
 """AIA-1013 #4 downstream guard: GatewayEnforce blocks un-gatewayed /mcp only when
 enforced + with a valid secret; inert by default; non-/mcp paths always open."""
 import asyncio
+import importlib
 import json
 import os
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 
 from gateway_trust import GatewayEnforce, secret_ok
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _scope(path="/mcp", secret=None):
@@ -78,3 +83,43 @@ def test_secret_ok_rotation():
     assert secret_ok(_scope(secret="new"), ["new", "old"])
     assert secret_ok(_scope(secret="old"), ["new", "old"])
     assert not secret_ok(_scope(secret="x"), ["new", "old"])
+
+
+def test_gateway_enforcement_boot_validation(monkeypatch):
+    import config as cfgmod
+
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "test-service-key")
+    monkeypatch.setenv("GATEWAY_ENFORCED", "true")
+    monkeypatch.setenv("GATEWAY_SHARED_SECRET", "")
+    importlib.reload(cfgmod)
+    try:
+        cfgmod.validate_config()
+    except RuntimeError as exc:
+        assert "requires GATEWAY_SHARED_SECRET" in str(exc)
+    else:
+        raise AssertionError("gateway enforcement started without a shared secret")
+
+    monkeypatch.setenv("GATEWAY_SHARED_SECRET", "short")
+    importlib.reload(cfgmod)
+    try:
+        cfgmod.validate_config()
+    except RuntimeError as exc:
+        assert "at least 32 characters" in str(exc)
+    else:
+        raise AssertionError("gateway enforcement accepted a weak shared secret")
+
+    monkeypatch.setenv("GATEWAY_SHARED_SECRET", "g" * 32)
+    importlib.reload(cfgmod)
+    cfgmod.validate_config()
+    # Restore both the process environment and the module-level Settings object so
+    # this test cannot leak enforced-gateway state into later tests in the same run.
+    monkeypatch.undo()
+    importlib.reload(cfgmod)
+
+
+def test_cloudflare_forwards_gateway_origin_settings():
+    worker = (ROOT / "cloudflare" / "src" / "index.ts").read_text(encoding="utf-8")
+    assert '"GATEWAY_ENFORCED", "GATEWAY_SHARED_SECRET"' in worker
+    for config_name in ("wrangler.jsonc", "wrangler.staging.jsonc"):
+        config = (ROOT / "cloudflare" / config_name).read_text(encoding="utf-8")
+        assert '"GATEWAY_ENFORCED": "false"' in config

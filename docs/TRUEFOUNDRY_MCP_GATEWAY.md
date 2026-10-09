@@ -17,7 +17,7 @@ would collapse twelve staff identities and every student into one principal. The
 per-user OAuth authorization-code flow with DCR and PKCE instead, so the upstream Moodle token still
 represents the human who initiated the call.
 
-## Applied repository state
+## Repository desired state
 
 | Control | State in this branch |
 | --- | --- |
@@ -29,7 +29,10 @@ represents the human who initiated the call.
 | Per-user MCP rate limit | 90 calls/minute and 2,000/hour, enforced without body logging |
 | Report cost limit | 60 `create_report` calls/hour/user, matching the source service cap |
 | Trace/data visibility | own traces; team aggregate metrics; tenant-admin investigation access |
-| Cedar pre-tool policy | default-deny student/staff tool matrix |
+| Cedar pre-tool policy | declarative, default-deny student/staff tool matrix |
+| Guardrail definitions | declarative Cedar, PII mutation, secret mutation and prompt-injection validation |
+| Guardrail binding | Cedar pre-tool; PII, secrets and prompt-injection post-tool |
+| Origin bypass resistance | shared header secret, accepted only on `/mcp`; origin fails boot if enforcement has no strong secret |
 | Drift test | manifest inventory, OAuth, collaborators, limits and Cedar coverage |
 
 `request_access` and `list_access_requests` stay disabled at the gateway because production
@@ -43,9 +46,13 @@ self-service access is off and none of the twelve data users is a registry admin
 3. Run `tfy apply --dir truefoundry/manifests --dry-run --show-diff` and review the resolved diff.
 4. Apply in staging, exercise the canary matrix below, then run `tfy apply --dir
    truefoundry/manifests` against production.
-5. Publish only the `jaipuria-moodle-student` and `jaipuria-moodle-staff` proxy URLs. Keep the source
+5. Store a generated secret in TrueFoundry, inject it into the remote server as
+   `x-mcp-gateway-secret`, and set the same value as the Cloudflare
+   `GATEWAY_SHARED_SECRET`. Verify the proxy can initialize before enabling
+   `GATEWAY_ENFORCED=true`; then verify a direct `/mcp` request receives `403 gateway_required`.
+6. Publish only the `jaipuria-moodle-student` and `jaipuria-moodle-staff` proxy URLs. Keep the source
    server without end-user collaborators so callers cannot bypass the curated surfaces.
-6. In each server's Tools tab, verify **Enable new tools by default** is off.
+7. In each server's Tools tab, verify **Enable new tools by default** is off.
 
 The repository does not contain a tenant credential, so these control-plane writes cannot be made by
 CI or by a local checkout until a tenant administrator authenticates `tfy`.
@@ -54,8 +61,11 @@ CI or by a local checkout until a tenant administrator authenticates `tfy`.
 
 ### MCP Tool Pre-Invoke
 
-Create a Cedar guardrail from `truefoundry/policies/moodle-access.cedar`, bind it to the production
-source MCP, and run these phases:
+The checked-in `truefoundry/manifests/41-moodle-access-guardrail-group.yaml` creates
+`moodle-access/cedar-rbac` from the reviewed policy in
+`truefoundry/policies/moodle-access.cedar`. The checked-in
+`truefoundry/manifests/50-moodle-guardrails.yaml` binds it to the production source and both curated
+virtual servers. Run these phases:
 
 1. Staging: Audit and compare decisions to the application audit ledger.
 2. Production canary: Enforce for the test student and one dean.
@@ -67,8 +77,9 @@ those row decisions.
 
 ### MCP Tool Post-Invoke
 
-Attach the existing PII/PHI redaction guardrail plus Secrets Detection and Prompt Injection to tool
-results. Use PII mutation/redaction, block detected secrets, and block indirect prompt injection.
+The `42` and `43` manifests provision every selector named by `50-moodle-guardrails.yaml`. They
+attach PII/PHI mutation plus Secrets Detection mutation and Prompt Injection validation to tool
+results, all with fail-closed enforcement.
 Keep the application pseudonymizer enabled: the post-tool policy is a second boundary, not a
 replacement.
 
