@@ -29,7 +29,22 @@
     { "tag": "v1", "new_sqlite_classes": ["MoodleMcpContainer"] }
   ],
 
-  "observability": { "enabled": true },
+  // Staging is low-volume, so retain every edge event while still stripping OAuth query data.
+  "observability": {
+    "enabled": true,
+    "redact_query_string": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+      "persist": true
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true
+    }
+  },
 
   // Non-secret config for STAGING. Note the base URL / allowed host point at the workers.dev origin,
   // not moodle-mcp.tryrehearsal.ai, so the OAuth issuer matches the staging hostname.

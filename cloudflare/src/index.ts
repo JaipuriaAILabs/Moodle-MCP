@@ -45,11 +45,8 @@ const CONTAINER_ENV_KEYS = [
   "MCP_PII_HMAC_KEY", "MCP_PII_REDACTION_MODE", "MCP_PII_TOKENIZE",
 ] as const;
 
-interface Env {
-  MOODLE_MCP_CONTAINER: DurableObjectNamespace<MoodleMcpContainer>;
-  [key: string]: unknown;
-}
-
+// `Env` is generated from wrangler.jsonc in worker-configuration.d.ts. Secrets are deliberately
+// absent from committed config, so access them dynamically only while forwarding allowlisted keys.
 export class MoodleMcpContainer extends Container<Env> {
   // uvicorn binds ${PORT:-8000}; CF injects no $PORT, so the app listens on 8000.
   defaultPort = 8000;
@@ -60,8 +57,9 @@ export class MoodleMcpContainer extends Container<Env> {
   constructor(ctx: DurableObjectState<{}>, env: Env) {
     super(ctx, env);
     const vars: Record<string, string> = {};
+    const runtimeEnv = env as unknown as Record<string, unknown>;
     for (const k of CONTAINER_ENV_KEYS) {
-      const v = env[k];
+      const v = runtimeEnv[k];
       if (typeof v === "string" && v !== "") vars[k] = v;
     }
     this.envVars = vars;

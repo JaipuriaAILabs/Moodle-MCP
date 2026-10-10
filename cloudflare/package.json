@@ -6,7 +6,7 @@
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
-    "types": "wrangler types",
+    "types": "wrangler types --include-runtime false",
     "tail": "wrangler tail"
   },
   "dependencies": {

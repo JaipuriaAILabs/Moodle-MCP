@@ -1,8 +1,7 @@
 name: CI
 
-# Gate every change to main on the plain-assert test suite + a byte-compile of the
-# whole package. The tests need no network (Supabase/HTTP are mocked or use dummy env),
-# so this runs in well under a minute.
+# Gate every change to main on the Python security suite and the Cloudflare Worker build.
+# Application tests need no network (Supabase/HTTP are mocked or use dummy env).
 
 on:
   pull_request:
@@ -15,6 +14,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  cloudflare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: cloudflare
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: cloudflare/package-lock.json
+      - run: npm ci
+      - name: Check generated Worker environment types
+        run: npm run types -- --check
+      - name: Type-check Worker
+        run: npm exec --no -- tsc --noEmit
+      - name: Validate production Worker bundle and bindings
+        env:
+          WRANGLER_LOG_PATH: /tmp/wrangler-production.log
+        run: >-
+          npx --no-install wrangler deploy --dry-run -c wrangler.jsonc
+          --containers-rollout=none --outdir /tmp/moodle-worker-production
+      - name: Validate staging Worker bundle and bindings
+        env:
+          WRANGLER_LOG_PATH: /tmp/wrangler-staging.log
+        run: >-
+          npx --no-install wrangler deploy --dry-run -c wrangler.staging.jsonc
+          --containers-rollout=none --outdir /tmp/moodle-worker-staging
+
   dependency-audit:
     runs-on: ubuntu-latest
     permissions:

@@ -42,7 +42,24 @@
     { "pattern": "moodle-mcp.rehearsal-os.app", "custom_domain": true }
   ],
 
-  "observability": { "enabled": true },
+  // Persist a bounded sample of edge logs and traces for production diagnosis. OAuth callback
+  // query strings can contain authorization codes, so URL queries are always redacted before
+  // Cloudflare stores either signal. Application-level MCP telemetry remains in New Relic.
+  "observability": {
+    "enabled": true,
+    "redact_query_string": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 0.1,
+      "invocation_logs": true,
+      "persist": true
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.1,
+      "persist": true
+    }
+  },
 
   // Non-secret config — mirrors the `value:` entries in ../render.yaml. Secrets (the `sync:false`
   // entries) are NOT here; set them with `wrangler secret put` (see README checklist). The Worker

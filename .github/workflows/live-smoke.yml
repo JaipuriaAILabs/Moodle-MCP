@@ -22,4 +22,4 @@ jobs:
         with:
           python-version: "3.12"
       - name: Check production discovery and auth boundary
-        run: python scripts/check_live_endpoint.py https://moodle-mcp.tryrehearsal.ai
+        run: python scripts/check_live_endpoint.py https://moodle-mcp.rehearsal-os.app
