@@ -23,6 +23,11 @@ MSG_RATE = "Rate limit exceeded — please slow down and retry shortly."
 MSG_ERROR = "This query could not be completed right now. Please retry."
 MSG_AUDIT = "The audit service is unavailable, so this request was not executed. Please retry."
 
+# Unauthenticated operational endpoints. Open at every gate (no bearer, no Host match, no
+# gateway secret) so platform liveness/readiness probes and load balancers can reach them
+# on the pod's internal address. They carry no PII and no server fingerprint.
+HEALTH_PATHS = ("/health", "/livez", "/readyz")
+
 # Students get a deliberately small, self-only tool surface. The row filters remain
 # the data boundary, but this allowlist removes cohort/roster/admin endpoints entirely
 # from a student session, shrinking the blast radius of any future query regression.
@@ -504,7 +509,7 @@ class HostGuard:
 
     async def __call__(self, scope, receive, send):
         if (scope.get("type") != "http" or not self.allowed_hosts
-                or scope.get("path") == "/health"):
+                or scope.get("path") in HEALTH_PATHS):
             return await self.app(scope, receive, send)
         headers = {k.decode().lower(): v.decode() for k, v in (scope.get("headers") or [])}
         host = headers.get("host", "").split(":", 1)[0].lower()
