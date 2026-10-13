@@ -82,5 +82,26 @@ asyncio.run(server.readyz(None))      # served from cache
 asyncio.run(server.readyz(None))      # served from cache
 check("cached: only one DB check across 3 probes within TTL", calls["n"] == 1)
 
+print("\n[ readiness gates on the OAuth store in OAuth mode ]")
+import config  # noqa: E402
+_Settings = type(config.settings)   # pydantic model: patch the CLASS, not the instance
+_orig_enabled = _Settings.oauth_enabled
+_orig_store = _Settings.oauth_storage_key
+supabase_client._client = lambda: _OKClient()   # data dep healthy for these cases
+try:
+    # OAuth on, store NOT configured -> not ready (no DB round-trip needed)
+    _Settings.oauth_enabled = lambda self: True
+    _Settings.oauth_storage_key = lambda self: ""
+    ok, detail = server._readiness_probe()
+    check("oauth mode + unconfigured store -> not ready", ok is False and detail == "oauth_store_unconfigured")
+
+    # OAuth on, store configured, data dep healthy -> ready
+    _Settings.oauth_storage_key = lambda self: "oauth-kv-key"
+    ok, detail = server._readiness_probe()
+    check("oauth mode + configured store + deps -> ready", ok is True and detail == "ok")
+finally:
+    _Settings.oauth_enabled = _orig_enabled
+    _Settings.oauth_storage_key = _orig_store
+
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

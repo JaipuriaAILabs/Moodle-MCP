@@ -239,8 +239,12 @@ _READYZ_TTL = 10.0
 
 
 def _readiness_probe() -> tuple[bool, str]:
-    """Bounded check that config is loaded and the data dependency is reachable.
-    Never raises — a probe must always return a verdict, not a 500."""
+    """Bounded check that config is coherent, the OAuth store is configured, and the data
+    dependency is reachable. Never raises — a probe must always return a verdict, not a 500."""
+    # In OAuth mode, sign-in can't persist without the OAuth store configured, so the replica
+    # isn't ready to serve. A config-presence check (no extra DB round-trip) avoids false 503s.
+    if settings.oauth_enabled() and not settings.oauth_storage_key().strip():
+        return False, "oauth_store_unconfigured"
     try:
         from supabase_client import _client
         # HEAD count on a tiny table: proves the DB round-trip works with minimal payload.
