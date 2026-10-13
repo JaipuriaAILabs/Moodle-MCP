@@ -107,6 +107,10 @@ permit (
         "report_data_availability",
         "create_report",
         "get_report_job",
-        "resolve_identities"
+        "resolve_identities",
+        "list_faculty",
+        "faculty_courses",
+        "course_faculty",
+        "faculty_feedback"
     ].contains(context.tool_name)
 };

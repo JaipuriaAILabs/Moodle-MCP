@@ -20,8 +20,8 @@ from config import settings, validate_config
 from security import (HostGuard, SecurityHeaders, TransportGuard,
                       build_middleware, quiet_noisy_loggers, resolve_request_principal)
 from supabase_client import create_service
-from tools import (access, actions, analytics, at_risk, identity, insights, reports, students,
-                   subjects)
+from tools import (access, actions, analytics, at_risk, faculty, identity, insights, reports,
+                   students, subjects)
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -200,6 +200,7 @@ async def whoami() -> dict:
 # Tool registration — DATA-FIRST modules first, then the secondary report layer.
 students.register(mcp, get_authenticated_service)     # roster + raw marks + attendance (primary)
 subjects.register(mcp, get_authenticated_service)     # subject catalog + cohort subject data
+faculty.register(mcp, get_authenticated_service)      # faculty directory + course assignments + feedback (staff)
 insights.register(mcp, get_authenticated_service)     # trajectory, student_360, cohort_pulse, watchlist
 analytics.register(mcp, get_authenticated_service)    # cohort marks/attendance overview, top, compare
 at_risk.register(mcp, get_authenticated_service)      # at-risk / attendance watch / zeros (raw)
