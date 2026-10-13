@@ -120,7 +120,7 @@ class Settings(BaseSettings):
     # changes nothing; turning these on records real identity / full tool
     # arguments / result payloads / source IP into mcp_audit.tool_calls.metadata.
     # These hold student PII + who-viewed-whom — keep the audit store locked-down,
-    # set a retention/consent posture, and never mirror them to New Relic in clear.
+    # set a retention/consent posture, and never mirror them to any external exporter in clear.
     capture_identity: bool = Field(default=False, alias="MCP_CAPTURE_IDENTITY")
     capture_arguments: bool = Field(default=False, alias="MCP_CAPTURE_ARGUMENTS")
     capture_results: bool = Field(default=False, alias="MCP_CAPTURE_RESULTS")
@@ -131,21 +131,23 @@ class Settings(BaseSettings):
     capture_args_max_bytes: int = Field(default=32768, alias="MCP_CAPTURE_ARGS_MAX_BYTES")
     capture_result_max_bytes: int = Field(default=262144, alias="MCP_CAPTURE_RESULT_MAX_BYTES")
 
-    # OpenTelemetry tracing -> New Relic (EU). Enabled only when NEW_RELIC_LICENSE_KEY
-    # (or an explicit MCP_OTEL_HEADERS override) is set; otherwise the server runs with
-    # zero telemetry and no OTel SDK is loaded. Endpoint defaults to New Relic's EU OTLP.
-    new_relic_license_key: str = Field(default="", alias="NEW_RELIC_LICENSE_KEY")
-    otel_endpoint: str = Field(default="https://otlp.eu01.nr-data.net", alias="MCP_OTEL_ENDPOINT")
+    # Generic OpenTelemetry OTLP/HTTP export. DISABLED BY DEFAULT: telemetry runs only when
+    # BOTH an endpoint (MCP_OTEL_ENDPOINT) and headers (MCP_OTEL_HEADERS) are explicitly set,
+    # otherwise the server runs with zero telemetry and no OTel SDK is loaded. (New Relic was
+    # retired — MCP observability now comes from the TrueFoundry MCP Gateway for tool traffic,
+    # Cloudflare Workers analytics for the runtime, and the Supabase mcp_audit ledger for the
+    # governance record. These env hooks remain only so a future OTLP backend needs no code change.)
+    otel_endpoint: str = Field(default="", alias="MCP_OTEL_ENDPOINT")
     otel_headers_raw: str = Field(default="", alias="MCP_OTEL_HEADERS")
     # Signal toggles (all inert unless otel_enabled()). Traces + metrics on by default;
     # logs OFF by default because app logs can carry operational detail we deliberately
-    # keep out of New Relic — opt in with MCP_OTEL_LOGS=true only after confirming the
+    # keep off any external exporter — opt in with MCP_OTEL_LOGS=true only after confirming the
     # log stream is PII-free (httpx access-token URLs are already quieted at boot).
     otel_traces: bool = Field(default=True, alias="MCP_OTEL_TRACES")
     otel_metrics: bool = Field(default=True, alias="MCP_OTEL_METRICS")
     otel_logs: bool = Field(default=False, alias="MCP_OTEL_LOGS")
-    # Metric export cadence (ms). New Relic recommends ≥ 5s; 60s is plenty for
-    # host/process gauges + tool counters and keeps ingest/cost low at 5k users.
+    # Metric export cadence (ms). 60s is plenty for host/process gauges + tool
+    # counters and keeps ingest/cost low at 5k users.
     otel_metric_interval_ms: int = Field(default=60000, alias="MCP_OTEL_METRIC_INTERVAL_MS")
     # Head sampling ratio for our SERVER entry spans (0..1, default 1.0 = keep all).
     # Our spans are the primary operational signal, so we NEVER let an upstream's
@@ -269,7 +271,9 @@ class Settings(BaseSettings):
         return bool(self.supabase_audit_key)
 
     def otel_enabled(self) -> bool:
-        return bool(self.new_relic_license_key.strip() or self.otel_headers_raw.strip())
+        # Generic OTLP export is on only when an endpoint AND headers are both explicitly
+        # configured. Off by default (no New Relic, no implicit backend).
+        return bool(self.otel_endpoint.strip() and self.otel_headers_raw.strip())
 
     def otel_traces_endpoint(self) -> str:
         return self.otel_endpoint.rstrip("/") + "/v1/traces"
@@ -292,13 +296,12 @@ class Settings(BaseSettings):
             return "unknown"
 
     def otel_headers(self) -> dict:
-        """OTLP exporter headers. An explicit MCP_OTEL_HEADERS ('k=v,k2=v2') wins;
-        otherwise New Relic's ingest header (api-key: <license key>)."""
+        """OTLP exporter headers, parsed from MCP_OTEL_HEADERS ('k=v,k2=v2'). Empty when unset
+        (telemetry is then disabled — otel_enabled() requires both an endpoint and headers)."""
         if self.otel_headers_raw.strip():
             return {k.strip(): v.strip() for k, v in
                     (kv.split("=", 1) for kv in self.otel_headers_raw.split(",") if "=" in kv)}
-        key = self.new_relic_license_key.strip()
-        return {"api-key": key} if key else {}
+        return {}
 
     def oauth_redirect_hosts(self) -> list[str]:
         return [host.strip().lower() for host in self.oauth_redirect_hosts_raw.split(",")

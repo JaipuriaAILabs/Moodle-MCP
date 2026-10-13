@@ -58,7 +58,6 @@
     "MCP_RATE_LIMIT_MAX_KEYS": "16384",
     "MCP_TRUST_PROXY_HEADERS": "true",
     "MCP_REQUIRE_AUDIT": "true",
-    "MCP_OTEL_ENDPOINT": "https://otlp.eu01.nr-data.net",
     "MCP_CAPTURE_IDENTITY": "true",
     "MCP_CAPTURE_ARGUMENTS": "true",
     "MCP_CAPTURE_RESULTS": "false",

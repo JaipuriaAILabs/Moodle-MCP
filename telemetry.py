@@ -1,16 +1,19 @@
-"""OpenTelemetry traces + metrics + logs → New Relic (EU), gated on configuration.
+"""OpenTelemetry traces + metrics + logs over generic OTLP/HTTP, gated on configuration.
 
-Enabled only when NEW_RELIC_LICENSE_KEY (or an explicit MCP_OTEL_HEADERS override) is
-set. When disabled — or when the OTel SDK isn't installed — setup is a no-op and the
-server behaves exactly as before. Instrumentation elsewhere uses the OTel *API* only
-(a no-op tracer/meter when no provider is installed), so it is always safe to call.
+Enabled only when BOTH MCP_OTEL_ENDPOINT and MCP_OTEL_HEADERS are set. When disabled — the
+default — or when the OTel SDK isn't installed, setup is a no-op and the server behaves exactly
+as before. Instrumentation elsewhere uses the OTel *API* only (a no-op tracer/meter when no
+provider is installed), so it is always safe to call. (New Relic was retired; day-to-day MCP
+observability comes from the TrueFoundry MCP Gateway for tool traffic, Cloudflare Workers
+analytics for the runtime, and the Supabase mcp_audit ledger. This stays as a generic,
+backend-agnostic OTLP hook that is off unless explicitly pointed at a collector.)
 
 Three signals, each independently toggleable (MCP_OTEL_TRACES/_METRICS/_LOGS) but all
-inert unless the key is set:
+inert unless an endpoint + headers are set:
 
 * **Traces** — one SERVER span per tool call, ``mcp.tool.<name>``, carrying
   ``mcp.tool`` / ``mcp.outcome`` / ``mcp.error_code`` / ``mcp.campus_scope`` and an
-  ERROR status on failure; plus an ``mcp.auth`` span per authentication. New Relic
+  ERROR status on failure; plus an ``mcp.auth`` span per authentication. The collector
   derives duration.ms, error, throughput and percentiles from these. Incoming W3C
   ``traceparent`` is honoured so a client harness span stitches to ours.
 * **Metrics** — host + process gauges (CPU, memory, RSS, open FDs …) via the system-
@@ -169,11 +172,11 @@ def _setup_logs(settings, resource) -> bool:
 
 
 def setup_telemetry(settings) -> bool:
-    """Install the OTel SDK + New Relic OTLP HTTP exporters for the enabled signals.
+    """Install the OTel SDK + OTLP/HTTP exporters for the enabled signals.
     Returns True if ANY signal was enabled, False otherwise. Never raises — a telemetry
     problem must not stop boot."""
     if not settings.otel_enabled():
-        log.info("OTel disabled (no NEW_RELIC_LICENSE_KEY / MCP_OTEL_HEADERS)")
+        log.info("OTel disabled (set MCP_OTEL_ENDPOINT + MCP_OTEL_HEADERS to enable)")
         return False
     try:
         # Probe the core SDK once so a missing install degrades cleanly to a no-op
@@ -224,7 +227,7 @@ def shutdown_telemetry() -> None:
     for provider in (_tracer_provider, _meter_provider, _logger_provider):
         if provider is None:
             continue
-        # Bound the flush: with New Relic unreachable at shutdown, an unbounded
+        # Bound the flush: with the collector unreachable at shutdown, an unbounded
         # force_flush would block the ASGI shutdown path up to the exporter's ~30s
         # default (then the platform SIGKILLs anyway). 3s is enough to drain a healthy
         # endpoint without stalling a redeploy. Some providers don't accept the kwarg —
@@ -313,8 +316,8 @@ def record_tool_metric(tool: str, outcome: str, error_code=None,
                        authorization: dict | None = None) -> None:
     """Emit the tool-call counter + duration histogram. No-op when metrics are off.
     Never raises. Attribute cardinality is deliberately bounded (tool + outcome +
-    error_code + all/scoped/none + bounded role/shadow outcome) so New Relic
-    metric cost stays flat at 5k users."""
+    error_code + all/scoped/none + bounded role/shadow outcome) so metric
+    cost stays flat at 5k users."""
     # Disabled hot path (SDK installed but no provider): _end_tool_span calls this on
     # every tool call, so skip building the attrs dict when no instrument exists.
     if _tool_calls is None and _tool_duration is None:
