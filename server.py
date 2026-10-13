@@ -31,7 +31,7 @@ quiet_noisy_loggers()  # httpx at INFO would log Google tokeninfo URLs incl. liv
 
 validate_config()
 
-# OpenTelemetry tracing → New Relic (EU). No-op unless NEW_RELIC_LICENSE_KEY is set.
+# OpenTelemetry tracing over generic OTLP. No-op unless MCP_OTEL_ENDPOINT + MCP_OTEL_HEADERS are set.
 from telemetry import setup_telemetry  # noqa: E402
 
 setup_telemetry(settings)

@@ -1,6 +1,7 @@
 """OTel telemetry gating (plain asserts). Verifies tracing is off unless configured,
-the New Relic OTLP wiring is derived correctly, setup never raises, and the span
-helpers are safe no-ops whether or not a provider/SDK is present.
+the generic OTLP wiring is derived correctly, setup never raises, and the span
+helpers are safe no-ops whether or not a provider/SDK is present. (New Relic retired —
+export is generic OTLP, off unless MCP_OTEL_ENDPOINT + MCP_OTEL_HEADERS are both set.)
 
 Run:  ../moodle-agent/.venv/bin/python tests/test_telemetry.py
 from the moodle-mcp directory.
@@ -29,8 +30,8 @@ def check(name, cond):
         print(f"  ✗ {name}")
 
 
-_ORIG = {k: getattr(settings, k) for k in
-         ("new_relic_license_key", "otel_headers_raw", "otel_endpoint")}
+TEST_EP = "https://otlp.example.test"
+_ORIG = {k: getattr(settings, k) for k in ("otel_headers_raw", "otel_endpoint")}
 
 
 def _set(**kw):
@@ -39,23 +40,22 @@ def _set(**kw):
 
 
 print("\n[ config gating ]")
-_set(new_relic_license_key="", otel_headers_raw="")
-check("disabled with no key/headers", settings.otel_enabled() is False)
+_set(otel_endpoint="", otel_headers_raw="")
+check("disabled with no endpoint/headers", settings.otel_enabled() is False)
 check("setup_telemetry() no-ops to False when disabled", telemetry.setup_telemetry(settings) is False)
 
-_set(new_relic_license_key="NRAK-testkey")
-check("enabled once a license key is set", settings.otel_enabled() is True)
-check("traces endpoint appends /v1/traces",
-      settings.otel_traces_endpoint() == "https://otlp.eu01.nr-data.net/v1/traces")
-check("NR ingest header derived from license key",
-      settings.otel_headers() == {"api-key": "NRAK-testkey"})
+_set(otel_endpoint=TEST_EP, otel_headers_raw="")
+check("endpoint without headers is still DISABLED", settings.otel_enabled() is False)
 
-_set(new_relic_license_key="", otel_headers_raw="api-key=abc,x-tenant=jaipuria")
+_set(otel_endpoint=TEST_EP, otel_headers_raw="authorization=Bearer tok,x-tenant=jaipuria")
+check("enabled once endpoint AND headers are set", settings.otel_enabled() is True)
+check("traces endpoint appends /v1/traces",
+      settings.otel_traces_endpoint() == TEST_EP + "/v1/traces")
 check("explicit MCP_OTEL_HEADERS parsed",
-      settings.otel_headers() == {"api-key": "abc", "x-tenant": "jaipuria"})
+      settings.otel_headers() == {"authorization": "Bearer tok", "x-tenant": "jaipuria"})
 
 print("\n[ setup never raises; returns a bool ]")
-_set(new_relic_license_key="NRAK-testkey", otel_headers_raw="")
+_set(otel_endpoint=TEST_EP, otel_headers_raw="authorization=Bearer tok")
 # Do not let an offline test install real exporters or attempt the network when the
 # optional SDK is present. setup_telemetry orchestration is what this case covers;
 # the signal builders have their own import/error guards in production.
@@ -94,9 +94,9 @@ check("start_span/end_span never raise (incl. None)", True)
 
 print("\n[ metrics/logs endpoints + service.instance.id ]")
 check("metrics endpoint appends /v1/metrics",
-      settings.otel_metrics_endpoint() == "https://otlp.eu01.nr-data.net/v1/metrics")
+      settings.otel_metrics_endpoint() == TEST_EP + "/v1/metrics")
 check("logs endpoint appends /v1/logs",
-      settings.otel_logs_endpoint() == "https://otlp.eu01.nr-data.net/v1/logs")
+      settings.otel_logs_endpoint() == TEST_EP + "/v1/logs")
 check("instance id falls back to a non-empty hostname",
       isinstance(settings.otel_instance_id(), str) and settings.otel_instance_id() != "")
 _orig_instance = settings.service_instance_id

@@ -14,8 +14,8 @@ starlette>=0.40
 # cryptography is a FIRST-PARTY import (oauth_storage.py Fernet/MultiFernet token-store
 # encryption), so pin it explicitly instead of inheriting a floating transitive version.
 cryptography>=43
-# OpenTelemetry traces + metrics + logs → New Relic OTLP. Loaded only when
-# NEW_RELIC_LICENSE_KEY is set (telemetry.setup_telemetry); the API is used for
+# OpenTelemetry traces + metrics + logs over generic OTLP/HTTP. Loaded only when
+# MCP_OTEL_ENDPOINT + MCP_OTEL_HEADERS are set (telemetry.setup_telemetry); the API is used for
 # instrumentation and no-ops otherwise. The otlp-proto-http exporter package ships the
 # trace, metric AND log exporters. system-metrics adds host/process gauges (CPU/mem/RSS)
 # and is imported optionally — its absence degrades to app-metrics-only, not a failure.
