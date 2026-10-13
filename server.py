@@ -17,7 +17,7 @@ from starlette.routing import Route
 
 from annotations import READONLY_ANNOTATIONS
 from config import settings, validate_config
-from security import (HostGuard, SecurityHeaders, TransportGuard,
+from security import (HEALTH_PATHS, HostGuard, SecurityHeaders, TransportGuard,
                       build_middleware, quiet_noisy_loggers, resolve_request_principal)
 from supabase_client import create_service
 from tools import (access, actions, analytics, at_risk, faculty, identity, insights, reports,
@@ -225,6 +225,47 @@ async def health_check(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
+async def livez(request: Request) -> JSONResponse:
+    # LIVENESS: the process and event loop are responsive. Deliberately makes NO
+    # downstream calls, so a transient dependency outage never triggers a replica
+    # restart (that is readiness' job, not liveness'). Kept as cheap as /health.
+    return JSONResponse({"status": "ok"})
+
+
+# Readiness is cached so a frequent probe cadence (e.g. every second) never hammers
+# the database — one real check per _READYZ_TTL seconds, shared across probes.
+_readyz_cache = {"ts": 0.0, "ready": False, "detail": "cold"}
+_READYZ_TTL = 10.0
+
+
+def _readiness_probe() -> tuple[bool, str]:
+    """Bounded check that config is loaded and the data dependency is reachable.
+    Never raises — a probe must always return a verdict, not a 500."""
+    try:
+        from supabase_client import _client
+        # HEAD count on a tiny table: proves the DB round-trip works with minimal payload.
+        (_client().table("extraction_runs").select("run_id", count="exact", head=True)
+         .limit(1).execute())
+        return True, "ok"
+    except Exception:  # noqa: BLE001 — readiness must never raise
+        log.warning("readiness dependency check failed", exc_info=True)
+        return False, "dependency_unavailable"
+
+
+async def readyz(request: Request) -> JSONResponse:
+    # READINESS: config loaded + a cached connectivity check to Supabase. Returns 503
+    # when the data dependency is unreachable so the platform stops ROUTING to this
+    # replica (without restarting it). Cached (TTL) to bound DB load under probe pressure.
+    import time
+    now = time.monotonic()
+    if now - _readyz_cache["ts"] >= _READYZ_TTL:
+        ready, detail = _readiness_probe()
+        _readyz_cache.update(ts=now, ready=ready, detail=detail)
+    ready, detail = _readyz_cache["ready"], _readyz_cache["detail"]
+    return JSONResponse({"status": "ready" if ready else "not_ready", "detail": detail},
+                        status_code=200 if ready else 503)
+
+
 async def brand_logo(request: Request):
     # Public brand icon for hosts that fetch by URL (the data-URI icon in
     # serverInfo is the primary; this is the belt-and-braces copy). No auth, no PII.
@@ -238,6 +279,8 @@ async def brand_logo(request: Request):
 
 
 app.routes.insert(0, Route("/health", health_check, methods=["GET"]))
+app.routes.insert(0, Route("/livez", livez, methods=["GET"]))
+app.routes.insert(0, Route("/readyz", readyz, methods=["GET"]))
 app.routes.insert(0, Route("/brand/logo.png", brand_logo, methods=["GET"]))
 
 # Keep FastMCP's browser-bound consent/CSRF transaction intact, but present it as
@@ -276,7 +319,7 @@ app = RegistrationGuard(app, allowed_https_hosts=settings.oauth_redirect_hosts()
 # unauthenticated tool enumeration) before JSON-RPC; /health stays open. OAuth mode: FastMCP's
 # auth layer owns token validation and the 401/WWW-Authenticate discovery handshake, and its
 # OAuth endpoints must be reachable pre-auth — so only the body cap + per-IP limit apply here.
-app = TransportGuard(app, open_paths=("/health", "/brand/logo.png"),
+app = TransportGuard(app, open_paths=(*HEALTH_PATHS, "/brand/logo.png"),
                      max_body=settings.max_body_bytes,
                      ip_rate_limit=settings.ip_rate_limit,
                      ip_window=settings.rate_window_seconds,
