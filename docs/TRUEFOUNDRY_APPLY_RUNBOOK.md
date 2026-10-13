@@ -170,3 +170,30 @@ Verify:
 - `tfy delete` / re-`tfy apply` a previous reviewed manifest set, or
 - Set `GATEWAY_ENFORCED=false` + redeploy to drop the origin boundary while you investigate.
 - Never publish the source origin URL as a fallback.
+
+---
+
+## Appendix — Staging `stateless_http` regression (Phase 5, needed only before ≥2 replicas)
+
+Default FastMCP HTTP keeps session state in-process, so with 2+ replicas a client's `initialize` and
+`tools/call` can land on different pods and break. `stateless_http=True` removes that assumption. It
+**cannot** be validated offline — it needs a staging Service with ≥2 replicas. Do NOT enable multi-replica
+until every row passes.
+
+**Setup:** deploy to a staging TrueFoundry Service with `stateless_http=True`, `minReplicas: 2`, and
+`MCP_REDIS_URL` set (in-process rate limiters do NOT share across replicas — Redis is required for shared limits).
+
+| # | Test | Pass criteria |
+| --- | --- | --- |
+| 1 | OAuth sign-in (DCR → authorize → Google → callback → token) | Completes; token usable on a *different* replica than it was issued on |
+| 2 | `initialize` then `tools/list` then `tools/call` across replicas | All succeed regardless of which pod each lands on (no "session not found") |
+| 3 | `whoami` | Returns the correct principal + campus scope under load balancing |
+| 4 | `create_report` (queue → `get_report_job` poll → completed) | Job created on one replica, polled/completed via another |
+| 5 | Progress/streaming responses | Stream completes without the draining-instance "ASGI callable returned without completing response" error |
+| 6 | Shared rate limit | > per-principal limit across replicas is rejected (proves Redis-backed, not per-pod) |
+| 7 | Readiness drain | Kill DB access to one replica → its `/readyz` → 503 → LB stops routing to it; others keep serving |
+| 8 | Rolling deploy | A rolling update does not drop an in-flight authenticated session |
+
+**Only after all 8 pass twice** (incl. once after a pod restart): set production `minReplicas: 2` + RPS/CPU
+autoscaling, with thresholds derived from a one-replica load test — not guessed. If any row fails, stay at
+one replica (sticky routing is best-effort and not a substitute).

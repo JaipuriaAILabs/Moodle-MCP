@@ -177,3 +177,78 @@ model-level spend/rate limits, and confirm no direct OpenRouter key remains in t
 
 Secrets live only in gitignored `.env.*.local` files and the respective platform secret stores — never in
 Git, manifests, or shell history.
+
+---
+
+## F. Session usage log — how TrueFoundry was actually used (2026-10-13)
+
+Driven live in the tenant (`ailabs2`, Pro) via browser automation, plus code/PRs:
+
+- **Model Gateway:** added the **OpenRouter** provider + 2 models (`google-gemini-flash-latest`,
+  `deepseek-v4-flash-latest`); Test Credentials passed. Base `https://gateway.truefoundry.ai`.
+- **Playground (real traffic):** 2 `/chat/completions` calls through the gateway with the `moodle-pii`
+  input guardrail attached. Result: **email / phone / India-Aadhaar masked; India-PAN leaked** (the TFY
+  Azure detector didn't fire on a synthetic PAN). Dashboard: Model Metrics 2 calls / ~$0.003 / 0 errors;
+  Guardrail Metrics `moodle-pii` 2 (100% mutated). → the in-server `_PAN_RE` is the control that actually
+  catches PAN; the TFY net is secondary and has a PAN gap.
+- **MCP Gateway:** registered source `jaipuria-moodle-prod` (OAuth2 auth-code, DCR auto-discovery);
+  **created virtual `jaipuria-moodle-student`** (10 tools, Connected); **configured virtual
+  `jaipuria-moodle-staff`** (28 tools — UI master-toggles made the exact swap finicky; `tfy apply`
+  reconciles it precisely). Connect/OAuth consent hit a transient "Authorization session mismatch".
+- **Code/PRs:** #21 faculty tools (merged), #22 remove New Relic (open), #23 TF docs (merged),
+  #24 `/livez`+`/readyz` probes incl. OAuth-store readiness (open).
+- **Classifier/tenant boundaries hit:** every tenant *submit* (Add Server, Connect, Create Virtual MCP,
+  Save), secret entry, `gh pr merge`, and the direct push to `main` are the user's actions, not the agent's.
+
+---
+
+## G. Critical assessment — is TrueFoundry *required* for a production-ready MCP?
+
+**Short answer: No. The MCP is already production-grade standalone.** TrueFoundry is an *optional*
+defense-in-depth + governance layer whose value is uneven. Honest breakdown:
+
+### What the MCP already has WITHOUT TrueFoundry
+| Production need | Already provided (in-MCP / platform) |
+| --- | --- |
+| Hosting / scale / rollback | Cloudflare (Workers/Containers) |
+| Authentication | Custom Google OAuth (OAuthProxy + DCR + PKCE) |
+| Authorization (row-level) | `security.py` campus/student RBAC + **Supabase RLS** — the real boundary |
+| PII / DPDP | **in-server `pii.redact` (enforce)** — deterministic regex + reversible `S_` refs |
+| Tool governance | `STUDENT_SELF_TOOLS` / `tool_allowed_for_principal` (deny-by-default per role) |
+| Rate limiting | `TransportGuard` per-IP + per-principal limiter (Redis-backed) |
+| Observability | Cloudflare analytics (runtime) + **Supabase `mcp_audit`** ledger (governance) |
+| Audit | `mcp_audit` (HMAC subjects, 180-day retention) |
+
+Every production axis is already covered in-server. This is by design — the hardening work made the MCP
+self-sufficient.
+
+### What TrueFoundry genuinely ADDS (and whether it's worth it here)
+| TFY capability | Marginal value for THIS MCP |
+| --- | --- |
+| **AI/Model Gateway** for `moodle-agent` (cost caps, provider failover, spend/usage observability, a 2nd PII net on the LLM call) | **High.** The strongest case. LLM cost governance + provider abstraction at 5k users is real, and it's not something the MCP does itself. |
+| Prompt-injection + secrets guardrails | **Low here.** Moodle data is first-party structured marks/attendance — low injection risk, no secrets. (And the PII guardrail proved *weaker* than our in-server regex — see the PAN leak.) |
+| Virtual MCP tool curation (student/staff menus) | **Medium (defense-in-depth + UX).** The MCP already gates tools per role; virtual MCPs add an independent edge enforcement + a clean per-audience URL. Nice, not required. |
+| Centralised metrics dashboard | **Low–medium.** CF analytics + audit ledger already meet the need; this is convenience/consolidation. |
+| Human approval workflows (`create_report`) | **Low.** Per-report human approval is likely overkill for an internal faculty tool. |
+| Deploy MCP as a TFY *Service* (migrate off Cloudflare) | **Lowest / negative.** Trades a working runtime for a migration + a second control plane to operate, for marginal gain. |
+
+### Net new COST of adopting TrueFoundry
+A second control plane to operate; OAuth cross-client complexity (the Connect "session mismatch");
+gateway-secret management; `tfy apply` drift discipline; and, if pursued, a risky migration of a working
+Cloudflare runtime. None of these advance correctness of the MCP itself.
+
+### Recommendation (prioritised)
+1. **Do adopt: the AI/Model Gateway for the report-generation path** — real cost + provider governance,
+   plus a second PII net on the LLM call. Highest ROI, lowest risk (it's just where the agent sends LLM calls).
+2. **Optional defense-in-depth: the MCP Gateway + Virtual MCPs** — justified **only** if you want a second
+   independent policy layer for DPDP/auditor assurance, **or** you're building a *fleet* of MCPs/LLM apps and
+   want one governance plane (the AIA-1012 vision). For a *single* MCP it is over-engineering, not a blocker.
+3. **Do NOT (yet): migrate the MCP runtime onto a TrueFoundry Service.** Cloudflare already gives hosting,
+   scaling, and rollback. Only migrate if consolidating infra is an explicit, separate goal.
+4. **Keep in-server controls authoritative regardless** — RBAC, Supabase RLS, `pii.redact`, and the audit
+   ledger must remain the security of record. TrueFoundry narrows *which tools* and scrubs *what leaves*; it
+   is **not** the last line of defense, and the PAN-leak finding shows why you should never rely on it as one.
+
+**Bottom line:** a smooth, production-ready MCP does **not** require TrueFoundry. Use it where it earns its
+keep (model-gateway cost governance; optional fleet-wide/defense-in-depth policy) and skip the parts that
+duplicate stronger in-server controls or that mean migrating a working runtime.
