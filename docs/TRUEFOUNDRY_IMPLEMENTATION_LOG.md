@@ -138,7 +138,7 @@ model-level spend/rate limits, and confirm no direct OpenRouter key remains in t
 ### C5. Observability ✅/🟡
 - **Live:** Model Metrics + Guardrail Metrics populated (from the gateway calls above). TrueFoundry's
   dashboard is populated by traffic flowing through the gateway — it is NOT an app-side exporter.
-- **New Relic removed** from the MCP (PR #22): generic OTLP is now off-by-default; runtime observability
+- **Hosted-APM backend removed** from the MCP (PR #22): generic OTLP is now off-by-default; runtime observability
   = Cloudflare Workers analytics; governance record = Supabase `mcp_audit` ledger; tool-traffic analytics
   = this TFY dashboard once enforced.
 - **Pending:** MCP Metrics populate only after `GATEWAY_ENFORCED=true` + clients on the virtual URLs.
@@ -155,7 +155,7 @@ model-level spend/rate limits, and confirm no direct OpenRouter key remains in t
 - ⛔ `moodle-agent` Virtual Account Token wiring (C2).
 - ⛔ The `create_report` single-execution **approval rule** (encoded staff tool name, post-apply).
 - ⛔ Inbound identity-provider mapping (Jaipuria Google IdP → TFY users/teams) for end users.
-- ⛔ PRs **#21** (faculty tools) + **#22** (remove New Relic) merge + deploy.
+- ⛔ PRs **#21** (faculty tools) + **#22** (retire hosted-APM backend) merge + deploy.
 - 🔎 **Decisions required before staff rollout:** raise/verify the TFY **India-PAN** detector; the
   **faculty-name `Person`** canary (ensure authorized faculty names aren't wrongly masked).
 

@@ -552,7 +552,7 @@ This log records what was *actually executed* against the live tenant and repos 
 session, separate from the plan above. "Live" means a control-plane read-back confirmed it.
 
 ### Phase 0 — Reconcile and Freeze Source — COMPLETE ✅
-- Immutable SHAs frozen: `origin/main` **0f79760**, PR #21 (faculty tools) **273d742**, PR #22 (remove New Relic) **6dab77d**.
+- Immutable SHAs frozen: `origin/main` **0f79760**, PR #21 (faculty tools) **273d742**, PR #22 (retire hosted-APM backend) **6dab77d**.
 - `git diff --check`: clean on both branches.
 - `scripts/validate_truefoundry_gateway.py`: **valid** on both branches.
 - No `.env`/secret files tracked in either branch.

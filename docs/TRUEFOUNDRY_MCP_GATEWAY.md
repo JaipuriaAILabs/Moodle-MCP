@@ -98,7 +98,7 @@ from the staff server's Tools tab before saving the approval policy.
 - Disable request/response body logging and **Log Request Body on Block**. Keep only identity,
   server/tool, result class, guardrail verdict, latency and rate-limit metadata.
 - Restrict trace/data access to the privacy and platform teams. Export operational OpenTelemetry
-  metrics to New Relic without prompt, result or detector-evidence bodies.
+  metrics over generic OTLP (to the configured collector) without prompt, result or detector-evidence bodies.
 - Export traces and metrics as separate OpenTelemetry signals so either can be disabled without
   changing the other. The destination and auth header are tenant secrets and are not committed.
 - Use TrueFoundry data routing only after the privacy owner approves the storage region, retention

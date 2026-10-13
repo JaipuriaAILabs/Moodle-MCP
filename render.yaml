@@ -64,19 +64,19 @@ services:
         sync: false
       - key: MCP_REQUIRE_AUDIT
         value: "true"
-      # OpenTelemetry tracing → New Relic EU (account 8495484). Set the ingest/license
-      # key to turn tracing on (per-tool spans → error rate, p95 latency, throughput);
+      # OpenTelemetry tracing (generic OTLP). Set MCP_OTEL_ENDPOINT + MCP_OTEL_HEADERS
+      # to turn tracing on (per-tool spans → error rate, p95 latency, throughput);
       # unset = no telemetry. See monitoring/README.md.
-      - key: NEW_RELIC_LICENSE_KEY
-        sync: false
       - key: MCP_OTEL_ENDPOINT
-        value: https://otlp.eu01.nr-data.net
+        sync: false
+      - key: MCP_OTEL_HEADERS
+        sync: false
       # Activity capture (AIA-1012). Each flag WIDENS mcp_audit.tool_calls.metadata
       # beyond the privacy-safe default. All "false" here = today's behaviour (only a
       # pseudonymised event is stored). Turn on to record real identity / full tool
       # arguments / result payloads / source IP — student PII + who-viewed-whom, so
       # gate them behind a decided retention + privacy-notice posture, and never
-      # mirror the raw values to New Relic. Size caps bound each row.
+      # mirror the raw values to the OTLP/telemetry backend. Size caps bound each row.
       # MEASURED activity recording ("to an extent", data-owner decision 2026-09-21):
       # capture WHO did WHAT — real identity + the call arguments (which student was
       # queried) + source IP + connection events — but NOT the returned result payloads
@@ -84,7 +84,7 @@ services:
       # That gives full accountability/traceability (AIA-1210) with far less PII.
       # REQUIRES, to persist: the mcp_audit backend applied (sql/2026-09-18_...) AND
       # SUPABASE_AUDIT_KEY (mcp_audit_writer JWT) + MCP_AUDIT_HMAC_KEY set below.
-      # Keep raw PII in this locked schema only — never mirror it to New Relic.
+      # Keep raw PII in this locked schema only — never mirror it to the OTLP/telemetry backend.
       - key: MCP_CAPTURE_IDENTITY
         value: "true"
       - key: MCP_CAPTURE_ARGUMENTS

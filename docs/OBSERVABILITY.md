@@ -1,7 +1,7 @@
 # Moodle MCP — Observability
 
-**New Relic has been retired.** MCP observability now comes from three complementary planes, none of
-which requires the server to ship telemetry to a third-party APM:
+**The hosted third-party APM backend has been retired.** MCP observability now comes from three
+complementary planes, none of which requires the server to ship telemetry to a third-party APM:
 
 ## 1. TrueFoundry MCP Gateway — tool traffic analytics
 When clients reach the MCP through the TrueFoundry MCP Gateway (the student/staff Virtual MCP URLs),
@@ -34,11 +34,13 @@ flags are explicitly enabled.
 ## Generic OTLP hook (optional, off by default)
 `telemetry.py` retains a backend-agnostic OTLP/HTTP exporter for traces/metrics/logs. It is **disabled
 unless BOTH `MCP_OTEL_ENDPOINT` and `MCP_OTEL_HEADERS` are set** — so a future OpenTelemetry collector can
-be wired with env only, no code change. There is no New Relic default endpoint or license-key path anymore.
+be wired with env only, no code change. There is no default hosted-APM endpoint or license-key path anymore.
 
-## Removing the last New Relic footprint (ops)
-The `NEW_RELIC_LICENSE_KEY` Cloudflare Worker **secret** is now unused by the code. Delete it for hygiene:
+## Removing the retired backend's footprint (ops)
+The leftover license-key Cloudflare Worker **secret** from the retired APM backend is now unused by the
+code. Delete it for hygiene (run against the prod + staging envs):
 
 ```
-wrangler secret delete NEW_RELIC_LICENSE_KEY   # (run against the prod + staging envs)
+wrangler secret list                 # find any leftover license-key secret from the retired backend
+wrangler secret delete <secret-name>
 ```

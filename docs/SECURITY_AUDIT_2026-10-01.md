@@ -15,7 +15,8 @@ institutional decisions, or the missing client-harness source.
   generation capability, and student self/batch-bound booleans. Shadow mode persists its bounded
   `allow|deny|pending|error` decision on every tool call.
 - Operational evidence: traces and metrics include bounded `mcp.role`, `mcp.campus_scope`, and
-  `mcp.rbac_shadow_outcome`; `NR_ALERTS.md` includes the shadow would-deny condition.
+  `mcp.rbac_shadow_outcome`; the shadow would-deny condition can be built on the `mcp_audit` ledger
+  or the OTLP metric (see `monitoring/README.md`, `docs/OBSERVABILITY.md`).
 - Access-request notification: successful queue inserts can emit an HTTPS HMAC-signed event with
   timestamp + nonce replay inputs. It contains role/campus only—no email, name, or derived identity.
   Delivery is best-effort; the database queue remains authoritative.
