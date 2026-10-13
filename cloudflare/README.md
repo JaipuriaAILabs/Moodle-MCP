@@ -64,7 +64,8 @@ wrangler secret put GATEWAY_SHARED_SECRET
 
 # Optional — set only if the feature is on
 wrangler secret put MCP_REDIS_URL                   # only if scaling >1 instance
-wrangler secret put NEW_RELIC_LICENSE_KEY           # turns on OTel → New Relic EU
+wrangler secret put MCP_OTEL_ENDPOINT               # optional: generic OTLP export (with MCP_OTEL_HEADERS)
+wrangler secret put MCP_OTEL_HEADERS                 # auth headers for the OTLP collector
 wrangler secret put MCP_FACULTY                      # faculty registry JSON (for RBAC enforce)
 wrangler secret put AGENT_API_BASE                  # enables create_report
 wrangler secret put AGENT_SHARED_SECRET             # with AGENT_API_BASE
@@ -94,8 +95,9 @@ Then cut over:
    A direct headerless `/mcp` initialize must then return `403 gateway_required`; the TrueFoundry
    virtual endpoints must remain healthy.
 3. Keep the prior container version available for immediate rollback during the observation window.
-4. Enable Workers Logs; confirm tool calls + OAuth errors are visible (replaces Render logs). New Relic
-   OTel still exports from inside the container if `NEW_RELIC_LICENSE_KEY` is set.
+4. Enable Workers Logs; confirm tool calls + OAuth errors are visible (replaces Render logs). An
+   optional generic OTLP export still runs from inside the container if `MCP_OTEL_ENDPOINT` +
+   `MCP_OTEL_HEADERS` are set.
 
 ## Acceptance checks (AIA-1391)
 ```sh

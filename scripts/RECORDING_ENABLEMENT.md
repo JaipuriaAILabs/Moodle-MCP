@@ -72,5 +72,5 @@ Expect `user_email`, `arguments`, `result`, `source_ip` populated.
 
 **Governance (do before wide launch):** restrict the `mcp_audit` schema to admins;
 add the privacy-notice line (activity + queried-record identifiers are logged); keep
-raw PII out of New Relic; schedule `select public.purge_expired_mcp_security_data();`
+raw PII out of any telemetry backend; schedule `select public.purge_expired_mcp_security_data();`
 (180-day retention) via pg_cron. See `docs/DATA_CAPTURE_PLAN.md`.

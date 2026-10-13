@@ -62,7 +62,8 @@ export default {
 Move every runtime var. Secrets via `wrangler secret put NAME`; non-secret flags can go in `vars`.
 - Data/OAuth/audit: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_DATA_KEY` (reporting_readonly), `SUPABASE_OAUTH_STORAGE_KEY`, `SUPABASE_AUDIT_KEY`, `MCP_AUDIT_HMAC_KEY`
 - OAuth: `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `OAUTH_STORAGE_ENCRYPTION_KEY`, `OAUTH_JWT_SIGNING_KEY` (do **NOT** set `OAUTH_ALLOW_CROSS_CLIENT_PKCE` unless also setting `OAUTH_REDIRECT_HOSTS` — it crash-loops otherwise)
-- Identity/observability: `MCP_SERVER_BASE_URL=https://moodle-mcp.tryrehearsal.ai` (no trailing slash), `NEW_RELIC_LICENSE_KEY`
+- Identity: `MCP_SERVER_BASE_URL=https://moodle-mcp.tryrehearsal.ai` (no trailing slash)
+- Observability (optional): `MCP_OTEL_ENDPOINT` + `MCP_OTEL_HEADERS` for generic OTLP export; runtime signal otherwise comes from Cloudflare Workers Logs and the `mcp_audit` ledger (see `docs/OBSERVABILITY.md`)
 - Capture flags (`vars`): `MCP_CAPTURE_IDENTITY/ARGUMENTS/CLIENT_IP=true`, `MCP_CAPTURE_RESULTS=false`, `MCP_TRUST_PROXY_HEADERS=true`
 - Report backend: `AGENT_API_BASE`, `AGENT_SHARED_SECRET`, `AGENT_REPORT_QUEUE`, `REPORT_PUBLIC_BASE_URL`, `MOODLE_BASE_URL` + Moodle WS token
 

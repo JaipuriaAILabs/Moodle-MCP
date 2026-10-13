@@ -24,7 +24,7 @@ inert unless an endpoint + headers are set:
 
 Every signal carries ``service.name`` / ``service.version`` / ``service.instance.id``
 so one instance is distinguishable from another once horizontally scaled.
-See monitoring/README.md for the alert NRQL.
+See monitoring/README.md for alerting guidance.
 """
 import logging
 

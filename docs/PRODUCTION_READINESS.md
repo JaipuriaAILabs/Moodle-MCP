@@ -81,10 +81,11 @@ plan. S3 report caching (shipped) limits regen cost. *(ops + eng · 1 day)*
 
 **1.2 Monitoring & alerting (code complete; ops activation required).** The MCP emits
 PII-safe OpenTelemetry traces/metrics with bounded tool, outcome, role, effective campus-scope,
-and shadow-decision dimensions; `NR_ALERTS.md` contains the alert queries. Configure the New Relic
-license/OTLP environment and create the production health, error-rate, p95, would-deny and uptime
-alerts. The `mcp_audit` ledger + `v_activity` view remain the detailed activity source.
-*(ops; eng shipped)*
+and shadow-decision dimensions; `monitoring/README.md` and `docs/OBSERVABILITY.md` describe the
+signals and alert conditions. Runtime signal comes from Cloudflare Workers Logs; optionally point
+the generic OTLP export (`MCP_OTEL_ENDPOINT` + `MCP_OTEL_HEADERS`) at a collector, then create the
+production health, error-rate, p95, would-deny and uptime alerts. The `mcp_audit` ledger +
+`v_activity` view remain the detailed activity source. *(ops; eng shipped)*
 
 **1.3 CI gate (done).** GitHub Actions runs the repository tests on PRs/pushes and now includes
 `pip-audit` plus Bandit; Dependabot covers Python and Actions dependencies. *(eng shipped)*
@@ -129,7 +130,7 @@ service actually reconnects OAuth sessions across deploys now that keys are pinn
 4. [ ] `MCP_REDIS_URL` set; per-IP limit raised or gateway enforced (0.4)
 5. [ ] Governance: `mcp_audit` locked to admins, privacy notice, retention (0.5)
 6. [ ] Report queue + worker; moodle-agent off free plan (1.1)
-7. [ ] New Relic health/error/latency alerts live (1.2)
+7. [ ] Health/error/latency alerts live (Workers Logs + optional OTLP; see `monitoring/README.md`) (1.2)
 8. [x] CI running tests plus dependency/static security scans on PRs (1.3)
 9. [ ] jaipuria-os `X-Request-Id` header deployed; join verified (1.4)
 10. [ ] Cohort ramp 150 → 500 → 5,000 with monitoring (2.5)
@@ -149,5 +150,6 @@ service actually reconnects OAuth sessions across deploys now that keys are pinn
   audit dimensions, PII-safe OTel telemetry, FastMCP 3.4.5 security upgrade, CI security gates,
   signed identity-free access notifications, and report capability-link rate limiting/auditing.
 - **Awaiting ops/decision:** paid-plan verification, stable production keys, Redis/gateway choice,
-  migration/capture/retention activation, real grant seeding and ENFORCE cutover, New Relic alert
-  creation, live privacy notice, prompt correlation, restore drill, and cohort load test.
+  migration/capture/retention activation, real grant seeding and ENFORCE cutover, observability
+  alert creation (Workers Logs + optional OTLP), live privacy notice, prompt correlation, restore
+  drill, and cohort load test.

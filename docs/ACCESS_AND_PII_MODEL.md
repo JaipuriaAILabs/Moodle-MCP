@@ -143,7 +143,7 @@ The 2026-10-01 isolation audit also closed direct-query
 holes in roster, enrolment counts, report availability, cached narratives, and declining-student name
 lookups. An explicit educator grant wins for a legitimate dual-role student/TA in every RBAC mode.
 Every audit event now retains identity-free role/effective-scope/self-bound facts, shadow decisions
-are durable in the audit ledger and bounded New Relic dimensions, and access requests can send a
+are durable in the audit ledger (and in any bounded OTLP telemetry dimensions), and access requests can send a
 signed identity-free webhook nudge (`MCP_ACCESS_REQUEST_WEBHOOK_*`). The administrator-only queue
 remains the only place where requester identity is disclosed. Receiver verification is documented in
 `docs/ACCESS_REQUEST_NOTIFICATIONS.md`.

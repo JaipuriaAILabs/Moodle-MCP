@@ -12,8 +12,8 @@ select cron.schedule(
 );
 
 -- 2) External /health keepalive — every 10 min (live: cron.job id 1). Documented here so
---    it isn't silently lost; the authoritative uptime signal is the New Relic Synthetics
---    monitor (monitoring/newrelic_uptime_alert.sh), not this ping.
+--    it isn't silently lost; the authoritative uptime signal is an external /health check
+--    with failure alerting (plus Cloudflare Workers request/error rates), not this ping.
 -- select cron.schedule(
 --   'mcp-health-keepalive', '*/10 * * * *',
 --   $$select net.http_get(url := 'https://moodle-mcp.tryrehearsal.ai/health', timeout_milliseconds := 5000);$$

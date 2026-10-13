@@ -25,7 +25,7 @@ Every tool call funnels through one chokepoint — `GuardMiddleware.on_call_tool
 partitioned `mcp_audit.tool_calls` (+ `users`/`sessions`/`clients`, 180-day purge).
 It stored, per call: tool, outcome, error_code, duration_ms, campus_scope,
 request_id, and **HMAC-pseudonymised** user/session/client. It deliberately dropped
-identity, arguments, results and IP. The MCP emits **no OTel/New Relic** — Supabase
+identity, arguments, results and IP. The MCP emits **no OTel telemetry** by default — Supabase
 + stderr is the only sink.
 
 ## What was added (this change — flag-gated, all default OFF)
@@ -62,9 +62,10 @@ the data needs no migration — only this convenience layer does.
 - **Phase 3 — identity spine + harness correlation:** thread one `x-request-id` from a
   harness turn → MCP call so Plane A/B join; confirm the harness's own message + agent-run
   retention and `MONGO_SYNC`.
-- **Phase 4 — live telemetry:** add OpenTelemetry to the MCP → New Relic EU (8495484):
-  per-tool latency/throughput/error-rate, active users, tool-usage mix, alerts;
-  `trace_id` join to the gateway/harness.
+- **Phase 4 — live telemetry:** point the MCP's generic OTLP export (`MCP_OTEL_ENDPOINT` +
+  `MCP_OTEL_HEADERS`) at an OpenTelemetry collector: per-tool latency/throughput/error-rate,
+  active users, tool-usage mix, alerts; `trace_id` join to the gateway/harness. (Runtime signal
+  otherwise comes from Cloudflare Workers Logs.)
 - **Phase 5 — analytics surface:** views/dashboard — per-user activity timeline,
   most-queried students, tool-usage funnel, adoption/DAU, error hotspots.
 
@@ -77,6 +78,6 @@ collection; to keep it defensible:
 
 1. **Privacy notice** — state that activity + queried-record identifiers are logged.
 2. **Keep raw identity/PII in the locked `mcp_audit` schema only — never mirror it to
-   New Relic in clear** (NR stays pseudonymised/aggregate).
+   any telemetry backend in clear** (OTLP export stays pseudonymised/aggregate).
 3. **Retention** — keep the 180-day purge, or scrub payloads sooner while keeping the
    event (example in the migration).

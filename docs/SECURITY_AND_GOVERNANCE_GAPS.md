@@ -51,7 +51,7 @@ ramp:** (G4) observability on, (G5) Redis before >1 instance.
 | # | Gap | OWASP | Status / owner |
 |---|---|---|---|
 | **G3** | Dependency hygiene — `cryptography` was unpinned (first-party import), `starlette` floor <0.40 (CVE-2024-47874), no lockfile. | LLM04 | **FIXED (pins)** this change; **OPEN:** commit a lockfile (uv/pip-tools) + deploy from it — eng. |
-| **G4** | Observability may be inert — `NEW_RELIC_LICENSE_KEY` unset → no spans/metrics/alerts. (`/health` uptime cron exists live.) | — | **OPEN — ops.** Set the EU ingest key, verify spans, add the NRQL alert conditions (`monitoring/README.md`). |
+| **G4** | Observability baseline. | — | **SATISFIED.** Observability is now Cloudflare Workers Logs (runtime) + the Supabase `mcp_audit` ledger (durable who-did-what), with an optional generic OTLP export (`MCP_OTEL_ENDPOINT` + `MCP_OTEL_HEADERS`) and the `/health` uptime cron. No hosted-APM key is required (see `docs/OBSERVABILITY.md`, `monitoring/README.md`). |
 | **G5** | Rate/cost limits are **per-instance** without `MCP_REDIS_URL`; scaling `plan: standard` >1 instance multiplies per-IP + per-principal + the `create_report` **LLM-spend** budget. | LLM06 | **OPEN — ops.** Set `MCP_REDIS_URL` before `numInstances>1`, or pin a single instance + document. |
 | **G6** | PII tokeniser HMAC key could fall back to the audit key (enumerable `student_id` → brute-forceable `student_ref`; coupled rotation). | LLM02 | **FIXED** this change — boot now requires a dedicated `MCP_PII_HMAC_KEY` when `MCP_PII_TOKENIZE=true`. (Feature dormant.) |
 
@@ -94,7 +94,7 @@ but scopes by actor + MCP self-check (G2 note). ASI06 Memory poisoning — N/A.
 ## Production-readiness checklist
 - [ ] **G1** Publish DPDP privacy notice + DPO contact (or reduce capture until then). — **blocker**
 - [ ] **G2** Decide access posture: enforce RBAC (needs faculty roster) or sign all-access risk. — **blocker**
-- [ ] **G4** Set `NEW_RELIC_LICENSE_KEY`, verify spans, add alert conditions. — pre-ramp
+- [x] **G4** Observability = Workers Logs + `mcp_audit` ledger + optional OTLP export; `/health` uptime cron live. — satisfied
 - [ ] **G5** Set `MCP_REDIS_URL` before scaling >1 instance (or pin single + document). — pre-scale
 - [ ] **G3** Commit a dependency lockfile; deploy from it. — pre-ramp
 - [x] Dependency CVE floors (cryptography, starlette) pinned — this change
