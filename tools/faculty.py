@@ -40,6 +40,11 @@ class CourseScopeParams(ScopeParams):
     course: str | None = Field(default=None, description="optional course code / name fragment", max_length=120)
 
 
+class FeedbackScopeParams(CourseScopeParams):
+    # faculty_feedback may be filtered to one teacher; the impl reads ``p.faculty`` (optional).
+    faculty: str | None = Field(default=None, description="optional faculty NAME or id to filter to one teacher", max_length=120)
+
+
 # --- scoped fetch -------------------------------------------------------------
 def _scoped_rows(svc, table, cols, p, *, course=None):
     """Campus-scoped rows from a current_faculty_* view, or None when the requested campus
@@ -203,7 +208,7 @@ def register(mcp, get_service):
         return _course_faculty_impl(await get_service(), params)
 
     @mcp.tool(title="Faculty Feedback", annotations=READONLY_ANNOTATIONS)
-    async def faculty_feedback(params: CourseScopeParams) -> dict:
+    async def faculty_feedback(params: FeedbackScopeParams) -> dict:
         """
         WHAT: Per-course student-feedback response volume (mid-term and end-term) from the faculty
         snapshot — how many responses each course/phase received.
