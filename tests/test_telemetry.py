@@ -41,14 +41,17 @@ def _set(**kw):
 
 print("\n[ config gating ]")
 _set(otel_endpoint="", otel_headers_raw="")
-check("disabled with no endpoint/headers", settings.otel_enabled() is False)
+check("disabled with no endpoint", settings.otel_enabled() is False)
 check("setup_telemetry() no-ops to False when disabled", telemetry.setup_telemetry(settings) is False)
 
+# Headers are OPTIONAL: an endpoint alone (a private/no-auth collector) enables export.
 _set(otel_endpoint=TEST_EP, otel_headers_raw="")
-check("endpoint without headers is still DISABLED", settings.otel_enabled() is False)
+check("endpoint alone ENABLES export (private collector, no auth header)",
+      settings.otel_enabled() is True)
+check("otel_headers() is empty when unset (exporter sends none)", settings.otel_headers() == {})
 
 _set(otel_endpoint=TEST_EP, otel_headers_raw="authorization=Bearer tok,x-tenant=jaipuria")
-check("enabled once endpoint AND headers are set", settings.otel_enabled() is True)
+check("still enabled with endpoint AND headers", settings.otel_enabled() is True)
 check("traces endpoint appends /v1/traces",
       settings.otel_traces_endpoint() == TEST_EP + "/v1/traces")
 check("explicit MCP_OTEL_HEADERS parsed",
@@ -106,6 +109,30 @@ settings.service_instance_id = _orig_instance
 check("traces + metrics on by default, logs OFF (PII caution)",
       settings.otel_traces is True and settings.otel_metrics is True
       and settings.otel_logs is False)
+
+print("\n[ resource attributes: namespace/environment only when set ]")
+_set(otel_service_namespace="", deploy_environment="")
+try:
+    _keys = set(telemetry._resource(settings).attributes.keys())
+    check("base resource has service.name/version/instance.id",
+          {"service.name", "service.version", "service.instance.id"} <= _keys)
+    check("no empty service.namespace/deployment.environment when unset",
+          "service.namespace" not in _keys and "deployment.environment" not in _keys)
+    _set(otel_service_namespace="jaipuria-os", deploy_environment="production")
+    _attrs = telemetry._resource(settings).attributes
+    check("service.namespace + deployment.environment attached when set",
+          _attrs.get("service.namespace") == "jaipuria-os"
+          and _attrs.get("deployment.environment") == "production")
+    _set(otel_service_namespace="", deploy_environment="")
+except ImportError:
+    check("resource attrs (OTel SDK not installed here — skipped)", True)
+
+print("\n[ tool-duration histogram buckets are explicit + ascending ms ]")
+_b = telemetry._TOOL_DURATION_BUCKETS_MS
+check("buckets are a non-empty strictly-ascending list",
+      isinstance(_b, list) and len(_b) >= 8 and _b == sorted(set(_b)))
+check("buckets span fast reads (<=100ms) to slow report handoff (>=30000ms)",
+      any(x <= 100 for x in _b) and any(x >= 30000 for x in _b))
 
 print("\n[ metric + shutdown helpers are safe no-ops ]")
 telemetry.record_tool_metric("get_student", "success", None, "noida", 0.012)  # must not raise

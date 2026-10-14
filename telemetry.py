@@ -1,15 +1,17 @@
 """OpenTelemetry traces + metrics + logs over generic OTLP/HTTP, gated on configuration.
 
-Enabled only when BOTH MCP_OTEL_ENDPOINT and MCP_OTEL_HEADERS are set. When disabled — the
-default — or when the OTel SDK isn't installed, setup is a no-op and the server behaves exactly
-as before. Instrumentation elsewhere uses the OTel *API* only (a no-op tracer/meter when no
-provider is installed), so it is always safe to call. (New Relic was retired; day-to-day MCP
-observability comes from the TrueFoundry MCP Gateway for tool traffic, Cloudflare Workers
-analytics for the runtime, and the Supabase mcp_audit ledger. This stays as a generic,
-backend-agnostic OTLP hook that is off unless explicitly pointed at a collector.)
+Enabled as soon as MCP_OTEL_ENDPOINT is set (the opt-in). MCP_OTEL_HEADERS is OPTIONAL — a
+private/internal collector needs no auth header, so an endpoint alone is enough; set headers only
+for a backend that authenticates. When disabled — the default, no endpoint — or when the OTel SDK
+isn't installed, setup is a no-op and the server behaves exactly as before. Instrumentation
+elsewhere uses the OTel *API* only (a no-op tracer/meter when no provider is installed), so it is
+always safe to call. (New Relic was retired; day-to-day MCP observability comes from the
+TrueFoundry MCP Gateway for tool traffic, Cloudflare Workers analytics for the runtime, and the
+Supabase mcp_audit ledger. This stays as a generic, backend-agnostic OTLP hook that is off unless
+explicitly pointed at a collector.)
 
 Three signals, each independently toggleable (MCP_OTEL_TRACES/_METRICS/_LOGS) but all
-inert unless an endpoint + headers are set:
+inert unless an endpoint is set:
 
 * **Traces** — one SERVER span per tool call, ``mcp.tool.<name>``, carrying
   ``mcp.tool`` / ``mcp.outcome`` / ``mcp.error_code`` / ``mcp.campus_scope`` and an
@@ -40,17 +42,31 @@ _meter_provider = None
 _logger_provider = None
 _logging_handler = None
 _tool_calls = None       # Counter
-_tool_duration = None    # Histogram (seconds)
+_tool_duration = None    # Histogram (milliseconds — see _TOOL_DURATION_BUCKETS_MS)
 _auth_calls = None       # Counter
 
 
 def _resource(settings):
     from opentelemetry.sdk.resources import Resource
-    return Resource.create({
+    attrs = {
         "service.name": settings.server_name,
         "service.version": settings.server_version,
         "service.instance.id": settings.otel_instance_id(),
-    })
+    }
+    # Optional grouping dimensions — only attached when explicitly set so an empty value
+    # never creates a misleading "" label or mislabels staging as production.
+    if settings.otel_service_namespace.strip():
+        attrs["service.namespace"] = settings.otel_service_namespace.strip()
+    if settings.deploy_environment.strip():
+        attrs["deployment.environment"] = settings.deploy_environment.strip()
+    return Resource.create(attrs)
+
+
+# Explicit millisecond histogram boundaries for mcp.tool.duration. The SDK default buckets are
+# fine for ms, but pinning them makes percentiles stable across backends and spans the real range
+# (fast reads ~10–250 ms through to a slow report handoff in the tens of seconds) rather than
+# leaving bucketing to a backend/version default. See monitoring/README.md.
+_TOOL_DURATION_BUCKETS_MS = [5, 10, 25, 50, 100, 250, 500, 1000, 2000, 3000, 5000, 10000, 30000, 60000]
 
 
 def _build_sampler(settings):
@@ -109,7 +125,18 @@ def _setup_metrics(settings, resource) -> bool:
                            headers=settings.otel_headers()),
         export_interval_millis=settings.otel_metric_interval_ms,
     )
-    provider = MeterProvider(resource=resource, metric_readers=[reader])
+    # Pin the tool-duration histogram buckets (ms) via a View so percentiles are stable and
+    # backend-independent. A View import failure must never sink metrics — fall back to defaults.
+    views = []
+    try:
+        from opentelemetry.sdk.metrics.view import (
+            ExplicitBucketHistogramAggregation, View)
+        views = [View(instrument_name="mcp.tool.duration",
+                      aggregation=ExplicitBucketHistogramAggregation(_TOOL_DURATION_BUCKETS_MS))]
+    except Exception:  # noqa: BLE001 — older SDKs / missing view API → default buckets
+        log.warning("explicit histogram buckets unavailable — using SDK default buckets",
+                    exc_info=True)
+    provider = MeterProvider(resource=resource, metric_readers=[reader], views=views)
     metrics.set_meter_provider(provider)
     _meter_provider = provider
 
@@ -176,7 +203,7 @@ def setup_telemetry(settings) -> bool:
     Returns True if ANY signal was enabled, False otherwise. Never raises — a telemetry
     problem must not stop boot."""
     if not settings.otel_enabled():
-        log.info("OTel disabled (set MCP_OTEL_ENDPOINT + MCP_OTEL_HEADERS to enable)")
+        log.info("OTel disabled (set MCP_OTEL_ENDPOINT to enable; MCP_OTEL_HEADERS optional)")
         return False
     try:
         # Probe the core SDK once so a missing install degrades cleanly to a no-op

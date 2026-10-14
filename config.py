@@ -131,14 +131,21 @@ class Settings(BaseSettings):
     capture_args_max_bytes: int = Field(default=32768, alias="MCP_CAPTURE_ARGS_MAX_BYTES")
     capture_result_max_bytes: int = Field(default=262144, alias="MCP_CAPTURE_RESULT_MAX_BYTES")
 
-    # Generic OpenTelemetry OTLP/HTTP export. DISABLED BY DEFAULT: telemetry runs only when
-    # BOTH an endpoint (MCP_OTEL_ENDPOINT) and headers (MCP_OTEL_HEADERS) are explicitly set,
-    # otherwise the server runs with zero telemetry and no OTel SDK is loaded. (New Relic was
-    # retired — MCP observability now comes from the TrueFoundry MCP Gateway for tool traffic,
+    # Generic OpenTelemetry OTLP/HTTP export. DISABLED BY DEFAULT: telemetry runs only when an
+    # endpoint (MCP_OTEL_ENDPOINT) is explicitly set — that is the opt-in. MCP_OTEL_HEADERS is
+    # OPTIONAL (auth header for a backend that needs one; a private collector needs none).
+    # With no endpoint the server runs with zero telemetry and no OTel SDK is loaded. (New Relic
+    # was retired — MCP observability now comes from the TrueFoundry MCP Gateway for tool traffic,
     # Cloudflare Workers analytics for the runtime, and the Supabase mcp_audit ledger for the
     # governance record. These env hooks remain only so a future OTLP backend needs no code change.)
     otel_endpoint: str = Field(default="", alias="MCP_OTEL_ENDPOINT")
     otel_headers_raw: str = Field(default="", alias="MCP_OTEL_HEADERS")
+    # Resource grouping for dashboards once telemetry is enabled: a logical service group and the
+    # deployment environment. Empty by default and only attached when set — never defaulted to an
+    # opinionated value that could silently mislabel staging as production. service.name /
+    # service.version / service.instance.id are always present (see telemetry._resource).
+    otel_service_namespace: str = Field(default="", alias="MCP_OTEL_SERVICE_NAMESPACE")
+    deploy_environment: str = Field(default="", alias="MCP_DEPLOY_ENV")
     # Signal toggles (all inert unless otel_enabled()). Traces + metrics on by default;
     # logs OFF by default because app logs can carry operational detail we deliberately
     # keep off any external exporter — opt in with MCP_OTEL_LOGS=true only after confirming the
@@ -271,9 +278,13 @@ class Settings(BaseSettings):
         return bool(self.supabase_audit_key)
 
     def otel_enabled(self) -> bool:
-        # Generic OTLP export is on only when an endpoint AND headers are both explicitly
-        # configured. Off by default (no New Relic, no implicit backend).
-        return bool(self.otel_endpoint.strip() and self.otel_headers_raw.strip())
+        # Generic OTLP export is on as soon as an endpoint is configured — that IS the
+        # explicit opt-in (an OTLP endpoint is never set by accident). Headers are OPTIONAL:
+        # a private/internal collector needs no auth header, so requiring MCP_OTEL_HEADERS
+        # would make an unauthenticated collector impossible to target. Set headers only for
+        # a backend that authenticates. Off by default (no endpoint, no New Relic, no implicit
+        # backend). Per-signal toggles (otel_traces/_metrics/_logs) still gate each signal.
+        return bool(self.otel_endpoint.strip())
 
     def otel_traces_endpoint(self) -> str:
         return self.otel_endpoint.rstrip("/") + "/v1/traces"
@@ -296,8 +307,9 @@ class Settings(BaseSettings):
             return "unknown"
 
     def otel_headers(self) -> dict:
-        """OTLP exporter headers, parsed from MCP_OTEL_HEADERS ('k=v,k2=v2'). Empty when unset
-        (telemetry is then disabled — otel_enabled() requires both an endpoint and headers)."""
+        """OTLP exporter headers, parsed from MCP_OTEL_HEADERS ('k=v,k2=v2'). Empty when unset —
+        telemetry still runs (a private collector needs no auth header); the exporter just sends
+        none. Malformed pairs (no '=') are skipped; validate_config warns if ALL pairs are bad."""
         if self.otel_headers_raw.strip():
             return {k.strip(): v.strip() for k, v in
                     (kv.split("=", 1) for kv in self.otel_headers_raw.split(",") if "=" in kv)}
@@ -564,6 +576,28 @@ def validate_config() -> None:
         if _kval and len(_kval.strip()) < 32:
             log.warning("%s is shorter than 32 chars — use a high-entropy (>=32 char) secret",
                         _kname)
+
+    # Generic OTLP export config — WARN ONLY, never raise: a telemetry misconfiguration must
+    # stay nonfatal (observable at boot, not a boot crash). Catches the common footguns:
+    # non-http(s) endpoint, a secret smuggled into the URL, an all-malformed header string, and
+    # out-of-range numeric knobs. The exporter itself still degrades to a no-op on a bad endpoint.
+    if settings.otel_endpoint.strip():
+        _otel_url = urlsplit(settings.otel_endpoint.strip())
+        if _otel_url.scheme not in ("http", "https") or not _otel_url.hostname:
+            log.warning("MCP_OTEL_ENDPOINT is not a valid http(s) URL (%r) — OTLP export may no-op",
+                        settings.otel_endpoint)
+        if _otel_url.username or _otel_url.password or _otel_url.query:
+            log.warning("MCP_OTEL_ENDPOINT must not carry credentials or a query string — "
+                        "put auth in MCP_OTEL_HEADERS, not the URL")
+        if settings.otel_headers_raw.strip() and not settings.otel_headers():
+            log.warning("MCP_OTEL_HEADERS is set but no valid 'k=v' pair parsed — "
+                        "the exporter will send no headers")
+        if not 0.0 <= settings.otel_sample_ratio <= 1.0:
+            log.warning("MCP_OTEL_SAMPLE_RATIO %s is outside [0,1] — it is clamped at runtime",
+                        settings.otel_sample_ratio)
+        if settings.otel_metric_interval_ms <= 0:
+            log.warning("MCP_OTEL_METRIC_INTERVAL_MS must be > 0 (got %s)",
+                        settings.otel_metric_interval_ms)
 
     # Fail boot on a partial/plaintext notification configuration.
     webhook_bits = (settings.access_request_webhook_url.strip(),

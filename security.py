@@ -824,6 +824,11 @@ def build_middleware(rate_limit: int, window: float):
             # headers → parent trace context (W3C traceparent) when the caller sent one.
             span = _start_tool_span(name, headers)  # None unless OTel tracing is enabled
             outcome, err = "failure", "error"      # finally records the final outcome
+            # A specific terminal error code to preserve when we deliberately raise a ToolError
+            # (e.g. a PII-enforce redaction failure): the generic `except ToolError` below would
+            # otherwise flatten it to "tool_error" in both the audit ledger and the span/metric,
+            # hiding a redaction fault behind an ordinary tool error. None → default "tool_error".
+            term_code = None
             from audit_store import record_tool_call
             try:
                 if settings.require_audit:
@@ -874,7 +879,7 @@ def build_middleware(rate_limit: int, window: float):
                         except Exception:  # noqa: BLE001
                             if pii_mode == "enforce":
                                 log.exception("pii redaction failed for %s — failing closed", name)
-                                outcome, err = "failure", "pii_error"
+                                outcome, err, term_code = "failure", "pii_error", "pii_error"
                                 raise ToolError(MSG_ERROR)
                             log.warning("pii shadow redaction failed for %s", name, exc_info=True)
                     try:
@@ -885,10 +890,13 @@ def build_middleware(rate_limit: int, window: float):
                         log.warning("post-success audit for %s failed", name, exc_info=True)
                     return result
                 except ToolError:
+                    # Preserve a specific terminal code (e.g. pii_error) set before the raise;
+                    # otherwise this is an ordinary tool error.
+                    code = term_code or "tool_error"
                     await record_tool_call(tool=name, principal=principal, ok=False,
                                            started=started, headers=headers,
-                                           scope=_scope(context, principal), error_code="tool_error", **cap)
-                    err = "tool_error"
+                                           scope=_scope(context, principal), error_code=code, **cap)
+                    err = code
                     raise  # already a clean, caller-safe message
                 except (PydanticValidationError, FastMCPValidationError) as e:
                     # Caller sent bad/missing parameters. Tell them WHICH — this is
