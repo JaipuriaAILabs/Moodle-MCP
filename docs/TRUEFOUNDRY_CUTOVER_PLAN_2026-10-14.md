@@ -150,3 +150,94 @@ pseudonym (`Aarav`), never a real name (token-then-stitch); no direct OpenRouter
 - [ ] 4.1 PAN detector · [ ] 4.2 Person canary
 - [ ] 5.1 secret both sides · [ ] 5.2 enforced · [ ] 5.3 403 verified · [ ] 5.4 clients migrated
 - [ ] 6.1 OpenRouter key rotated
+
+---
+
+# Appendix A — Dashboard runbook, grounded in the TrueFoundry MCP docs (read 2026-10-14)
+
+Sources: `/docs/ai-gateway/mcp/mcp-server-getting-started`, `/mcp-gateway-auth-security`,
+`/virtual-mcp-server`, `/connect-mcp-from-ide`.
+
+## A.0 The auth model — the single most important thing to understand
+TrueFoundry separates **two** authentications, and they are independent:
+
+- **INBOUND** (end user → the gateway): the caller must present a **TrueFoundry-recognized identity** —
+  TrueFoundry OAuth (browser sign-in), a Personal/Virtual Account token, **or an external IdP (Google)
+  JWT** that TrueFoundry is configured to accept. *This is the piece that is not yet set up.*
+- **OUTBOUND** (gateway → our Moodle MCP origin): already configured as **OAuth2 Authorization Code**
+  (3LO) — each end user consents once to **our** Google OAuth, and that per-user token is what our MCP's
+  RBAC/RLS uses. The gateway stores and auto-refreshes it.
+
+So a staff member hitting a virtual URL authenticates **twice**: once to TFY (inbound), once to our
+Moodle OAuth (outbound consent, one-time). Our per-campus/per-student authorization rides on the
+**outbound** token — TrueFoundry is the ingress/policy/observability layer, not the authority.
+
+## A.1 ⚠️ Key decision + scaling caveat (this reshapes Phase 2 and gates Phase 5)
+Mapping Google → a TFY **team** requires, per the docs, that **the target users already exist in the
+tenant**. That is fine for the **~12 staff** but **does not scale to ~3,000 students**. Combined with the
+fact that **`GATEWAY_ENFORCED` is origin-wide** (it forces *everyone* through the gateway), this gives:
+
+- ✅ **Staff gateway is practical now** — 12 known users, manageable inbound identity.
+- ⚠️ **Student gateway at scale is not** with the team-mapping model — options are **Token Passthrough**
+  (gateway forwards the Google JWT; our MCP would need to accept it directly — it uses OAuthProxy today,
+  so this needs validation), or **resolve-to-Virtual-Account** (loses per-user TFY attribution; our MCP
+  still enforces per-user via the outbound token), or **keep students off the gateway** (direct origin /
+  Rehearsal OS).
+- 🔴 **Therefore: do NOT run Phase 5 (origin-wide enforce) until the student path is decided** — enforcing
+  would lock out every student. **Recommended: run a STAFF PILOT first** (Phases 1–2 for staff only,
+  observe in TFY), and make the student-inbound decision before any enforcement.
+
+## A.2 Register / connect the source (confirms Phase 1)
+1. Left sidebar → **MCP Gateway** → **Add Server** → **Connect any Remote MCP Server**.
+   *(Our `jaipuria-moodle-prod` is already registered via `tfy apply`; this is for reference / edits.)*
+2. Fields: **Name**, **Display Name**, **Description**, **URL** (`https://moodle-mcp.rehearsal-os.app/mcp`),
+   **Collaborators**, **Auth Data**. Our **Auth Data = OAuth2 → Authorization Code** (Token URL,
+   Registration URL, Code Challenge = **S256**, JWT Source = **Access Token**; no client secret — DCR).
+3. **Connect:** click **Connect Now** → complete our Google consent screen → the tools appear. *(A request
+   without consent returns 401 `McpAuthRequiredError` + an authorization URL — expected before consent.)*
+   → **this is Phase 1.2.** If it errors with a redirect/session mismatch, apply Phase 1.1 (cross-client PKCE).
+
+## A.3 Inbound identity — register Jaipuria Google as an IdP (this is Phase 2.1–2.2)
+**Settings → Security & Access → Identity Providers → “+”**. Enter the **issuer URL**, **allowed
+audiences**, **JWKS URI**, and a **Provider** value. Under **Resolve Token To**:
+- **Team/User** (for humans): set the **Team Claim** → map Google-signed-in staff to a TFY team. *Target
+  users must already exist in the tenant* (pre-create the 12 staff).
+- **Virtual Account** (machine / the scale workaround): set **Name Claim** (+ optional **Organization Claim**).
+
+Then grant that team on the server (A.4).
+
+## A.4 Access control — grant who can use each server (Phase 2.3)
+Open the MCP server (or **virtual** server) → **Collaborators** tab → **+ Add Collaborators** → add the
+team/users → role **MCP Server User** (`mcp-server-user`) to use, **MCP Server Manager** to administer.
+Access can be scoped per-server and per-tool. *(`tfy apply` already set `team:everyone` on student and the
+12 named staff on staff; the IdP mapping is what makes those identities real.)*
+
+## A.5 Virtual MCP servers (reference — already applied)
+Created via the dashboard (Supademo walkthrough) or `tfy apply`. **Best Effort Mode** OFF (we want a hard
+fail if the source is down). Tools are renamed `<tool>_<server-id>` at the virtual layer — this is why the
+`create_report` approval rule (2.4) must target the **encoded** name, which only exists post-apply.
+
+## A.6 The real client URL + how clients connect (corrects Phase 1/5 — do NOT hardcode)
+- URL format is `https://<gateway>/<tenant>/mcp/<server>/server` — **copy the exact URL from each server's
+  “How To Use” tab** (it is the source of truth; our earlier `gateway.truefoundry.ai/mcp/<server>/server`
+  guess may be missing the tenant segment).
+- **Default client auth = “Sign in with TrueFoundry” (OAuth)** — the client config is just the URL, no
+  token; the client opens a browser, the user signs in to TFY and clicks **Approve**, then completes our
+  Moodle OAuth consent once. (Claude Code: `claude mcp add --transport http <name> <url>`; Claude Desktop:
+  add a custom/remote connector with that URL. A Personal Access Token header is the fallback for headless.)
+
+## A.7 Reset / rollback inside TFY
+MCP server detail → three-dot menu next to **Edit** → **Revoke all tokens** → confirm **Revoke All**. This
+clears all stored OAuth tokens + auth overrides for the server (everyone re-consents). Recorded in
+**Activity Logs**. Note: it only clears tokens at the gateway — to invalidate upstream, also revoke in the
+provider (our Google OAuth / Supabase OAuth store).
+
+## A.8 Grounded sequence to “make it live” (staff pilot)
+1. **Phase 1** — confirm the source is **Connected** (A.2; apply cross-client PKCE if the consent errors),
+   re-apply manifests, smoke-test the **student** URL from its How-To-Use tab (team:everyone needs no IdP).
+2. **Phase 2 (staff)** — register Google IdP (A.3) → pre-create/ map the 12 staff to a team → grant on
+   `jaipuria-moodle-staff` (A.4) → add the `create_report` approval on the encoded name → a staff member
+   connects with the **How-To-Use** URL and verifies `whoami` + a scoped query through the gateway.
+3. **Observe** MCP + guardrail metrics in TFY for the staff pilot.
+4. **Decide the student path** (A.1) **before** Phase 5. Only then install the gateway secret both sides and
+   flip `GATEWAY_ENFORCED=true` (origin-wide) — with the instant flag rollback ready.
