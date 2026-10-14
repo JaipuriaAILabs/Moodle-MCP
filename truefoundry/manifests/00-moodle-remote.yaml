@@ -11,6 +11,7 @@
     "enable_tools_by_default": false,
     "enabled_tools": [
       "whoami",
+      "onboarding",
       "list_students",
       "get_student",
       "student_marks",

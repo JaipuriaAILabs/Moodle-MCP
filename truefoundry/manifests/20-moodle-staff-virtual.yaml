@@ -9,6 +9,7 @@
       "name": "jaipuria-moodle-prod",
       "enabled_tools": [
         "whoami",
+        "onboarding",
         "list_students",
         "get_student",
         "student_marks",

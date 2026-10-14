@@ -302,7 +302,19 @@ revoke all on function public.mcp_scope_allows_student_row(text,text)
 revoke all on function public.mcp_scope_allows_course(text,text)
   from public, anon, authenticated;
 revoke all on function public.resolve_mcp_student_identity(text)
-  from public, anon, authenticated, mcp_oauth_writer, mcp_audit_writer;
+  from public, anon, authenticated;
+-- Writer roles may not exist in every project (e.g. prod lacks mcp_oauth_writer); a
+-- non-existent role can hold no grant, so revoke only when present. Avoids the 42704
+-- abort ("role mcp_oauth_writer does not exist") that rolls back the whole migration.
+do $$
+begin
+  if exists (select 1 from pg_roles where rolname = 'mcp_oauth_writer') then
+    execute 'revoke all on function public.resolve_mcp_student_identity(text) from mcp_oauth_writer';
+  end if;
+  if exists (select 1 from pg_roles where rolname = 'mcp_audit_writer') then
+    execute 'revoke all on function public.resolve_mcp_student_identity(text) from mcp_audit_writer';
+  end if;
+end $$;
 revoke all on function public.mcp_scope_probe() from public, anon, authenticated;
 
 grant execute on function public.mcp_request_scope() to reporting_readonly;

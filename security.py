@@ -34,6 +34,7 @@ HEALTH_PATHS = ("/health", "/livez", "/readyz")
 # New tools fail closed for students until they are explicitly reviewed and added here.
 STUDENT_SELF_TOOLS = frozenset({
     "whoami",
+    "onboarding",
     "get_student",
     "student_marks",
     "student_attendance",
@@ -45,9 +46,10 @@ STUDENT_SELF_TOOLS = frozenset({
     "resolve_identities",
 })
 
-# An unprovisioned educator may identify themselves and file an access request, but
-# cannot touch data or inspect the approval queue. New tools also fail closed here.
-PENDING_TOOLS = frozenset({"whoami", "request_access"})
+# An unprovisioned educator may identify themselves, see the onboarding landing page, and
+# file an access request, but cannot touch data or inspect the approval queue. New tools
+# also fail closed here.
+PENDING_TOOLS = frozenset({"whoami", "onboarding", "request_access"})
 
 
 def tool_allowed_for_principal(tool: str, principal) -> bool:
