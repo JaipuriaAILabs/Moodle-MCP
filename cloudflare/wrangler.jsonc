@@ -67,12 +67,17 @@
     "MCP_RBAC_MODE": "enforce",
     "MCP_CAMPUSES": "noida,lucknow,jaipur,indore",
     "MCP_STUDENT_SELF_ACCESS": "true",
-    "MCP_SELF_SERVICE_ACCESS": "false",
+    "MCP_SELF_SERVICE_ACCESS": "true",
     // Keep false until the same strong secret is installed in TrueFoundry and
     // Cloudflare and a gateway canary succeeds. The production cutover changes
     // only this flag; config.py refuses to boot if the secret is missing/weak.
     "GATEWAY_ENFORCED": "false",
-    "AGENT_REPORT_QUEUE": "true",
+    // Report generation (create_report) — the agent (reports.tryrehearsal.ai) runs SYNC mode
+    // (/generate + Basic auth via AGENT_ADMIN_USER/PASS secrets). Queue mode is OFF because the
+    // agent has no report-jobs worker / shared secret configured. AGENT_API_BASE + the two admin
+    // secrets were missing after the Render->Cloudflare migration, which disabled create_report.
+    "AGENT_API_BASE": "https://reports.tryrehearsal.ai",
+    "AGENT_REPORT_QUEUE": "false",
     "REPORT_PUBLIC_BASE_URL": "https://reports.tryrehearsal.ai",
     "MCP_PII_REDACTION_MODE": "enforce"
   }
