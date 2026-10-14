@@ -200,13 +200,19 @@ $$;
 
 -- Resolve a row whose campus lives on the students table. Matching run_id as well
 -- as student_id prevents a reused enrolment id from authorizing the wrong snapshot.
+-- SECURITY DEFINER + row_security=off: the inner students lookup must NOT re-trigger RLS
+-- (recursive policy eval per row -> statement timeouts for campus-scoped staff). The scope
+-- decision (mcp_scope_allows, from the server-set header) still enforces the boundary, and
+-- the function returns only a boolean, so no rows can leak. Uses the students PK (run_id,student_id).
 create or replace function public.mcp_scope_allows_student_row(
   p_run_id text,
   p_student_id text
 ) returns boolean
 language sql
 stable
+security definer
 set search_path = ''
+set row_security = off
 as $$
   select exists (
     select 1
@@ -225,7 +231,9 @@ create or replace function public.mcp_scope_allows_course(
 ) returns boolean
 language plpgsql
 stable
+security definer
 set search_path = ''
+set row_security = off
 as $$
 declare
   scope jsonb := public.mcp_request_scope();
@@ -239,7 +247,10 @@ begin
       from public.enrolments e
       where e.run_id::text = p_run_id
         and e.course_id = p_course_id
-        and public.mcp_scope_allows_student_row(e.run_id, e.student_id)
+        -- e.run_id is uuid; the helper takes text. uuid->text is not an implicit cast for
+        -- function resolution, so omitting ::text raised "function does not exist" -> the
+        -- catch-all returned false -> student-scoped users saw NO courses. Cast explicitly.
+        and public.mcp_scope_allows_student_row(e.run_id::text, e.student_id::text)
     );
   elsif scope ->> 'kind' = 'staff' then
     return exists (
