@@ -39,8 +39,11 @@ const CONTAINER_ENV_KEYS = [
   // TrueFoundry gateway -> origin trust. Without forwarding these values the
   // Python boundary would silently stay disabled even when Wrangler has them.
   "GATEWAY_ENFORCED", "GATEWAY_SHARED_SECRET",
-  // Report generation (create_report → moodle-agent)
+  // Report generation (create_report → moodle-agent). AGENT_ADMIN_USER/PASS are the
+  // sync-mode (/generate Basic-auth) credentials; without forwarding them the container
+  // crash-loops at boot (config.validate_config requires both when AGENT_REPORT_QUEUE=false).
   "AGENT_API_BASE", "AGENT_SHARED_SECRET", "AGENT_REPORT_QUEUE", "REPORT_PUBLIC_BASE_URL",
+  "AGENT_ADMIN_USER", "AGENT_ADMIN_PASS",
   // In-server PII redaction (shipped flag-gated)
   "MCP_PII_HMAC_KEY", "MCP_PII_REDACTION_MODE", "MCP_PII_TOKENIZE",
 ] as const;
