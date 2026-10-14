@@ -12,21 +12,29 @@ prerequisite — the MCP already has OAuth + campus/student RBAC + scoped RLS + 
 
 ---
 
-## 0. Where we are (grounded 2026-10-14)
+## 0. Where we are (VERIFIED live via `tfy apply --dry-run` 2026-10-14)
 
-**Done:** Model Gateway live (OpenRouter + 2 models, playground-verified) · `tfy apply` of core manifests
-done (source `jaipuria-moodle-prod`, student + staff virtual MCPs, 3 guardrail groups, binding,
-data-access) · in-server PII redaction `enforce` LIVE in prod (the primary DPDP control) · code shipped
-(manifests + validator, `GatewayEnforce` middleware, faculty tools) · PRs #21/#22/#26/#27 merged.
+**CONFIGURATION — ~95% live** ✅ (dry-run against the tenant returned "no changes" for each, i.e. already
+applied): source `jaipuria-moodle-prod` · virtual `jaipuria-moodle-student` · virtual `jaipuria-moodle-staff`
+· guardrail groups `moodle-access`/cedar, `moodle-pii`, `moodle-security` · binding `moodle-mcp-guardrails`
+· `gateway-data-access-config`. Plus: Model Gateway live (OpenRouter + 2 models, playground-verified);
+in-server PII redaction `enforce` LIVE in prod; code shipped (manifests + validator, `GatewayEnforce`,
+faculty tools); PRs #21/#22/#26/#27 merged. **Yesterday's `tfy apply` genuinely landed the whole config.**
 
-**Not done (why the gateway is not yet in use):** `GATEWAY_ENFORCED=false` (origin accepts direct
-traffic — gateway is bypassable) · `GATEWAY_SHARED_SECRET` absent both sides · inbound identity (Jaipuria
-Google IdP → TFY) not registered · source OAuth consent ("Connect") not confirmed · `moodle-agent` not
-routed through the AI gateway (no Virtual Account Token) · `create_report` approval rule unset ·
-rate-limit manifests `30/31` use an invalid type (never applied) · `onboarding` tool not in the applied
-manifest subset · MCP metrics won't populate until traffic flows through the gateway.
+**Config drift to reconcile (one re-apply):** the live `jaipuria-moodle-staff` toolset is the OLD set —
+**missing `create_report` + the 4 faculty tools**, still has `list_access_requests`; and `onboarding`
+(PR #28) isn't in `manifests_core` yet. A re-apply after Phase 0 fixes both.
 
-**Net: ~60% there.** The hard config/code is done; the *cutover sequence* is not.
+**ACTIVATION — not done (this is all that's left; the config is NOT the gap):** `GATEWAY_ENFORCED=false`
+(origin accepts direct traffic — gateway bypassable) · `GATEWAY_SHARED_SECRET` absent both sides · inbound
+identity (Jaipuria Google IdP → TFY) not registered · source OAuth consent ("Connect") not confirmed in the
+dashboard · `moodle-agent` not routed through the AI gateway (no VAT) · `create_report` approval rule unset ·
+rate-limit manifests `30/31` invalid type (never applied) · no traffic through the gateway yet (so MCP
+metrics empty).
+
+**Net: the *configuration* is essentially done and live; only the *cutover* (identity → connect → enforce →
+migrate clients) remains.** The dashboard can confirm the two things the CLI can't: the source's Connect/
+consent status, and whether any traffic has flowed (MCP Metrics).
 
 ---
 
