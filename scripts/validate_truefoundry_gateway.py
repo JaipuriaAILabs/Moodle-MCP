@@ -14,6 +14,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFESTS = ROOT / "truefoundry" / "manifests"
+# MCP rate-limit configs (type `tenant-rate-limit-config/mcp`) live here, NOT in manifests/,
+# because `tfy apply` (CLI 0.17.5) rejects that type ("Invalid type tenant-rate-limit-config");
+# they are applied in the dashboard. Keeping them out of manifests/ lets `tfy apply -d manifests`
+# run clean. The schema is valid per the TrueFoundry MCP rate-limiting docs.
+DASHBOARD_CONFIG = ROOT / "truefoundry" / "dashboard-config"
 POLICY = ROOT / "truefoundry" / "policies" / "moodle-access.cedar"
 
 APPROVED_STAFF = {
@@ -33,8 +38,8 @@ APPROVED_STAFF = {
 ACCESS_ADMIN_TOOLS = {"request_access", "list_access_requests"}
 
 
-def _load(name: str) -> dict:
-    path = MANIFESTS / name
+def _load(name: str, base: Path = MANIFESTS) -> dict:
+    path = base / name
     text = path.read_text(encoding="utf-8")
     assert "<string>" not in text and "TODO" not in text, f"placeholder in {path}"
     return json.loads(text)
@@ -116,14 +121,15 @@ def validate() -> None:
     }
     assert staff_users == APPROVED_STAFF
 
-    user_limit = _load("30-moodle-user-rate-limit.yaml")
+    # MCP rate limits are dashboard-applied (see DASHBOARD_CONFIG note); schema still validated.
+    user_limit = _load("30-moodle-user-rate-limit.yaml", DASHBOARD_CONFIG)
     assert user_limit["type"] == "tenant-rate-limit-config/mcp"
     assert user_limit["when"]["mcp_servers"]["in"] == ["jaipuria-moodle-prod"]
     assert user_limit["applies_to"]["type"] == "per-user"
     assert user_limit["mode"] == "enforce"
     assert user_limit["log_request_body_on_block"] is False
 
-    report_limit = _load("31-moodle-report-rate-limit.yaml")
+    report_limit = _load("31-moodle-report-rate-limit.yaml", DASHBOARD_CONFIG)
     assert report_limit["when"]["mcp_servers"]["in"] == [
         "jaipuria-moodle-prod:create_report"
     ]

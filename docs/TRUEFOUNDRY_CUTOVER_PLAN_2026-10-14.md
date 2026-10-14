@@ -23,13 +23,17 @@ faculty tools); PRs #21/#22/#26/#27 merged. **Yesterday's `tfy apply` genuinely 
 
 **Config drift to reconcile (one re-apply):** the live `jaipuria-moodle-staff` toolset is the OLD set —
 **missing `create_report` + the 4 faculty tools**, still has `list_access_requests`; and `onboarding`
-(PR #28) isn't in `manifests_core` yet. A re-apply after Phase 0 fixes both.
+(PR #28) isn't in `manifests/` on main yet. A re-apply of `manifests/` after #28 merges fixes both —
+**no `manifests_core` needed**: the tracked `manifests/` already hold the correct staff toolset; the
+scratch `manifests_core` used earlier was stale, and the live tenant is what's behind.
 
 **ACTIVATION — not done (this is all that's left; the config is NOT the gap):** `GATEWAY_ENFORCED=false`
 (origin accepts direct traffic — gateway bypassable) · `GATEWAY_SHARED_SECRET` absent both sides · inbound
 identity (Jaipuria Google IdP → TFY) not registered · source OAuth consent ("Connect") not confirmed in the
 dashboard · `moodle-agent` not routed through the AI gateway (no VAT) · `create_report` approval rule unset ·
-rate-limit manifests `30/31` invalid type (never applied) · no traffic through the gateway yet (so MCP
+MCP rate limits `30/31` are dashboard-applied (valid schema, but `tfy` CLI 0.17.5 rejects the type —
+relocated to `truefoundry/dashboard-config/` so `tfy apply -d manifests` runs clean; defense-in-depth
+anyway, the MCP rate-limits in-app) · no traffic through the gateway yet (so MCP
 metrics empty).
 
 **Net: the *configuration* is essentially done and live; only the *cutover* (identity → connect → enforce →
@@ -69,8 +73,8 @@ Phase 3 runs in parallel with 1–2 (model gateway ≠ MCP gateway).
 
 | # | Step | Detail |
 | --- | --- | --- |
-| 0.1 | Rewrite `manifests/30` + `31` | Replace the invalid `tenant-rate-limit-config/mcp` type with `gateway-rate-limiting-config` (rules[] / limit_to / unit / rate_limit_applies_per). Keep per-user + `create_report` 60/hr intent. |
-| 0.2 | Add `onboarding` to the applied subset | Add the tool to `truefoundry/manifests_core/` (the subset driving `tfy apply`); `manifests/` already has it from PR #28. Re-run the validator. |
+| 0.1 | **Relocate** `30/31` (not rewrite) | ✅ DONE. The schema is correct per TFY MCP rate-limit docs; the `tfy` CLI just rejects the type. Moved to `truefoundry/dashboard-config/` (+README) so `tfy apply -d truefoundry/manifests` runs clean; apply these two in the dashboard. Validator updated. |
+| 0.2 | `onboarding` in the apply set | No `manifests_core` needed — `onboarding` is in the tracked `manifests/` via PR #28. Applying `manifests/` after #28 merges reconciles the live staff toolset + onboarding in one shot. |
 | 0.3 | Prepare the agent VAT env template | Add `TRUEFOUNDRY_*` keys to `moodle-agent`'s `.env.truefoundry.local` / render env template (values filled in Phase 3). |
 | 0.4 | Correct `TRUEFOUNDRY_IMPLEMENTATION_LOG.md` | Bring it to the real state (this plan is the forward view). |
 
@@ -151,7 +155,7 @@ pseudonym (`Aarav`), never a real name (token-then-stitch); no direct OpenRouter
 - **What I can execute directly:** Phase 0 entirely; 1.1, 5.2–5.3 (Cloudflare deploys); all verification. Everything in the TFY dashboard, Cloudflare *secrets*, `tfy apply`, OAuth consent/sign-in, and the agent deploy are yours / the Rehearsal team's — I prepare and guide each.
 
 ## Quick status checklist
-- [ ] 0.1 rate-limit manifests rewritten · [ ] 0.2 onboarding in manifests_core · [ ] 0.3 agent env template · [ ] 0.4 log corrected
+- [x] 0.1 rate-limit manifests relocated (dashboard-config) · [x] 0.2 onboarding already in manifests/ (via #28) · [ ] 0.3 agent env template · [ ] 0.4 log corrected
 - [ ] 1.1 cross-client PKCE (if needed) · [ ] 1.2 source connected · [ ] 1.3 re-applied · [ ] student URL smoke test
 - [ ] 2.1 IdP registered · [ ] 2.2 team mapped · [ ] 2.3 staff granted · [ ] 2.4 approval rule · [ ] staff smoke test
 - [ ] 3.1 VAT · [ ] 3.2 agent env · [ ] 3.3 agent redeploy · [ ] report-through-gateway verified
