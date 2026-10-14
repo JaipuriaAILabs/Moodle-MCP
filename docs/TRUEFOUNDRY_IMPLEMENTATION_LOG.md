@@ -18,6 +18,34 @@ Legend: ✅ implemented & verified · 🟡 implemented in code/config, not yet l
 
 ---
 
+## ⚡ STATUS UPDATE — 2026-10-14 (verified via `tfy apply --dry-run` + the TFY dashboard)
+
+**Sections C/D below are OUTDATED.** The real state:
+
+- **`tfy apply` of the gateway config is DONE and live** — a dry-run against the tenant returns
+  "no changes" for: source `jaipuria-moodle-prod`, virtual `jaipuria-moodle-staff` (27 tools) and
+  `jaipuria-moodle-student` (10 tools), all three guardrail groups (`moodle-access`/cedar, `moodle-pii`,
+  `moodle-security`), the binding `moodle-mcp-guardrails`, and `gateway-data-access-config`. PRs
+  #21/#22/#26/#27 are merged.
+- **All three servers show "Connected"** in the dashboard — the OAuth2 Authorization-Code consent to our
+  origin is completed (for `ailabs2`; Disconnect button present). The source exposes **34 tools**.
+- **Real gateway URL** (from each server's *How To Use* tab; the tenant segment is `gradelessai`):
+  `https://gateway.truefoundry.ai/gradelessai/mcp/<server>/server` — i.e.
+  `.../jaipuria-moodle-prod/server`, `.../jaipuria-moodle-staff/server`, `.../jaipuria-moodle-student/server`.
+- **Traffic: 80 MCP calls, ALL handshakes** (initialize / tools-list / discover); **0 tool calls, 0 callers.**
+  The gateway connects and lists tools, but no real tool call has run through it yet (one `whoami` proves it).
+- **MCP rate-limit configs `30/31`** moved to `truefoundry/dashboard-config/` — schema is valid per the TFY
+  docs, but `tfy` CLI 0.17.5 rejects the type (dashboard-applied). `tfy apply -d truefoundry/manifests` now
+  runs clean.
+- **Drift:** the live **staff virtual is on the OLD toolset** (27 tools — missing the 4 faculty tools +
+  `create_report`, still has `list_access_requests`). A re-apply of `manifests/` reconciles it.
+
+**So: CONFIG is done and live; what remains is ACTIVATION** — inbound identity (so users beyond `ailabs2`
+authenticate), a first real tool call / client migration, the staff-toolset re-apply, and (optional)
+enforcement. Forward plan: `docs/TRUEFOUNDRY_CUTOVER_PLAN_2026-10-14.md`.
+
+---
+
 ## A. Code implemented — `moodle-mcp` repo
 
 ### A1. Gateway desired-state manifests — `truefoundry/` ✅ (in Git; `tfy apply` pending)

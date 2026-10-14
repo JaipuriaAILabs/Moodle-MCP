@@ -229,10 +229,15 @@ Created via the dashboard (Supademo walkthrough) or `tfy apply`. **Best Effort M
 fail if the source is down). Tools are renamed `<tool>_<server-id>` at the virtual layer — this is why the
 `create_report` approval rule (2.4) must target the **encoded** name, which only exists post-apply.
 
-## A.6 The real client URL + how clients connect (corrects Phase 1/5 — do NOT hardcode)
-- URL format is `https://<gateway>/<tenant>/mcp/<server>/server` — **copy the exact URL from each server's
-  “How To Use” tab** (it is the source of truth; our earlier `gateway.truefoundry.ai/mcp/<server>/server`
-  guess may be missing the tenant segment).
+## A.6 The real client URL + how clients connect (CONFIRMED from the dashboard 2026-10-14)
+- Format `https://<gateway>/<tenant>/mcp/<server>/server`; the tenant segment is **`gradelessai`**.
+  **Confirmed live URLs** (from the How-To-Use tab):
+  - source: `https://gateway.truefoundry.ai/gradelessai/mcp/jaipuria-moodle-prod/server`
+  - staff:  `https://gateway.truefoundry.ai/gradelessai/mcp/jaipuria-moodle-staff/server`
+  - student:`https://gateway.truefoundry.ai/gradelessai/mcp/jaipuria-moodle-student/server`
+  (My earlier `gateway.truefoundry.ai/mcp/<server>/server` guess was missing `/gradelessai`.)
+- Dashboard verification 2026-10-14: all three servers = **Connected** (OAuth consent done for ailabs2);
+  80 MCP calls so far but **all handshakes, 0 tool calls** — the gateway lists tools but none have run yet.
 - **Default client auth = “Sign in with TrueFoundry” (OAuth)** — the client config is just the URL, no
   token; the client opens a browser, the user signs in to TFY and clicks **Approve**, then completes our
   Moodle OAuth consent once. (Claude Code: `claude mcp add --transport http <name> <url>`; Claude Desktop:
