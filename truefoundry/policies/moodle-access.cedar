@@ -47,6 +47,7 @@ permit (
     principal.teamNames.contains("everyone") &&
     [
         "whoami",
+        "onboarding",
         "get_student",
         "student_marks",
         "student_attendance",
@@ -81,6 +82,7 @@ permit (
     ].contains(principal.email) &&
     [
         "whoami",
+        "onboarding",
         "list_students",
         "get_student",
         "student_marks",
