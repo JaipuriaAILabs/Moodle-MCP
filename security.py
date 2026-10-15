@@ -7,7 +7,6 @@ Wiring (see server.py):
   * GuardMiddleware (FastMCP)  — per tool-call: rate limit + audit + catch-all error boundary.
   * resolve_principal(token)   — cached, constant-time token -> principal.
 """
-import asyncio
 import hashlib
 import hmac
 import json
@@ -393,17 +392,18 @@ def resolve_request_principal(headers: dict | None = None):
     return resolve_principal(bearer_of(headers or {}))
 
 
-# --- login ledger (fire-and-forget) ------------------------------------------
+# --- login ledger ------------------------------------------------------------
 _login_seen: dict[str, float] = {}   # email -> last-recorded monotonic ts (per-process throttle)
-_login_bg_tasks: set = set()         # keep task refs so the loop does not GC them mid-flight
 _LOGIN_THROTTLE_S = 300.0            # record a given identity at most once per 5 min
 
 
-def _record_login_bg(principal) -> None:
+async def _record_login(principal) -> None:
     """Record an authenticated login (email + resolved role/campuses) in the mcp_logins
-    ledger — throttled per-email and FIRE-AND-FORGET, so it never blocks or fails the
-    request. 'Who has used the MCP and with what access', queryable in Supabase. Roles
-    themselves stay authoritative in mcp_faculty; this is an observability ledger."""
+    ledger — throttled per-email. Awaited (a fire-and-forget create_task is cancelled when
+    the ASGI request scope ends), but bounded (httpx 3s) and never raises, so on the throttled
+    path it adds negligible latency and can never block or break the request. 'Who has used
+    the MCP and with what access', queryable in Supabase; roles stay authoritative in
+    mcp_faculty — this is an observability ledger."""
     if not isinstance(principal, dict):
         return
     email = (principal.get("email") or "").strip().lower()
@@ -415,11 +415,9 @@ def _record_login_bg(principal) -> None:
     _login_seen[email] = now
     try:
         import faculty as _registry
-        task = asyncio.create_task(asyncio.to_thread(
-            _registry.record_login, email, principal.get("name"),
-            principal.get("role"), principal.get("campuses")))
-        _login_bg_tasks.add(task)
-        task.add_done_callback(_login_bg_tasks.discard)
+        await _registry.record_login(
+            email, principal.get("name"), principal.get("role"),
+            principal.get("campuses"))
     except Exception:  # noqa: BLE001 — a login nudge must never perturb traffic
         pass
 
@@ -835,9 +833,6 @@ def build_middleware(rate_limit: int, window: float):
             # only tool invocations (AIA-1210 connection counts / user-email traceability).
             # Best-effort and post-hoc: a connect is never blocked or failed by auditing.
             principal = _principal()
-            # Persist the login (email + resolved role) in the mcp_logins ledger — throttled,
-            # fire-and-forget, off the request path (never blocks or fails the connect).
-            _record_login_bg(principal)
             headers = get_http_headers() or {}
             started = time.monotonic()
             result = await call_next(context)
@@ -853,9 +848,6 @@ def build_middleware(rate_limit: int, window: float):
         async def on_call_tool(self, context, call_next):
             name = getattr(context.message, "name", "?")
             principal = _principal()
-            # Login ledger (throttled, fire-and-forget): the tool path is where the principal
-            # is reliably resolved, so this reliably captures active identities + their role.
-            _record_login_bg(principal)
             headers = get_http_headers() or {}
             started = time.monotonic()
             # Capture context — enriched into metadata only when the MCP_CAPTURE_* flags
