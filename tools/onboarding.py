@@ -206,7 +206,7 @@ def render_onboarding(principal: dict, campuses, designations=SELF_SERVICE_DESIG
   <div class="stripe"></div>
   <div class="pad head">
     <div class="re">Re</div>
-    <div><div class="org">Jaipuria Institute of Management</div><h1>Moodle Analytics</h1></div>
+    <div><div class="org">Jaipuria Institute of Management</div><h1>Moodle MCP</h1></div>
   </div>
   <div class="sec">
     <h2><span class="num">01</span>Your identity</h2>
