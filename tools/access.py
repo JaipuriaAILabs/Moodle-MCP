@@ -70,5 +70,11 @@ def register(mcp, get_service):
         import faculty as registry
         svc = await get_service()
         if getattr(svc, "role", None) != "admin":
-            raise PermissionError("admin only")
-        return {"pending": registry.list_pending_requests()}
+            # Graceful, visible denial (not a raised error the host renders as a bare
+            # "Error calling tool"): this is read-only and admin-scoped, so tell the
+            # caller plainly rather than failing opaquely.
+            return {"ok": False, "admin_only": True,
+                    "note": "This tool is for administrators only — reviewing and approving "
+                            "access requests is an admin action. Ask an administrator to check "
+                            "the queue."}
+        return {"ok": True, "pending": registry.list_pending_requests()}

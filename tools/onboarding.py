@@ -13,6 +13,10 @@ Rendering: returns an MCP-UI resource (``ui://moodle/onboarding``) that MCP-UI-c
 clients show as an interactive page whose submit posts a ``request_access`` tool call,
 AND a plain-text fallback so a text-only client still works (the model reads the questions
 and calls ``request_access`` itself). Identity is HTML-escaped before it touches the markup.
+
+Visual identity follows the official Rehearsal brand kit: the 4-stop rainbow stripe at the
+card's top edge, Indigo (#4e44fd) primary, the "Re" mark, and Raleway with a system-font
+fallback (font CDNs can be blocked in a sandboxed iframe, so the layout degrades cleanly).
 """
 import mcp.types as _t
 
@@ -32,6 +36,82 @@ SELF_SERVICE_DESIGNATIONS = (
 _STAFF_ROLES = {"admin", "cross_campus", "campus_admin", "faculty", "viewer"}
 
 _UI_URI = "ui://moodle/onboarding"
+
+# --- static page chrome (plain strings: CSS/JS braces are literal, not f-string) ---------
+_PAGE_HEAD = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jaipuria Moodle — Welcome</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Raleway:wght@200;400;600&display=swap');
+:root{
+  --re-black:#0a0a0a; --re-white:#ffffff; --re-lavender:#9677f8; --re-indigo:#4e44fd;
+  --re-coral:#ff4859; --re-green:#00c483; --re-orange:#ff5e00; --re-gray-800:#262626;
+  color-scheme:dark;
+  --page:var(--re-black); --ink:var(--re-white); --card:#121319; --muted:#b0b0b0;
+  --line:var(--re-gray-800); --input-line:#4a4a52;
+  --button-bg:var(--re-indigo); --button-hover:#3c32d4; --button-ink:#ffffff;
+  --success:var(--re-green); --warning:var(--re-orange);
+  --stripe:linear-gradient(90deg,var(--re-lavender),var(--re-indigo),var(--re-coral),var(--re-green));
+  --font:'Raleway',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
+*{box-sizing:border-box}
+body{font:14px/1.6 var(--font);margin:0;background:var(--page);color:var(--ink);
+  -webkit-font-smoothing:antialiased;letter-spacing:.005em;}
+.wrap{max-width:560px;margin:24px auto;padding:0 16px;}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;}
+.stripe{height:4px;background:var(--stripe);}
+.pad{padding:22px 24px;}
+.head{display:flex;align-items:center;gap:13px;}
+.re{width:42px;height:42px;border-radius:12px;background:var(--re-black);color:#fff;display:flex;
+  align-items:center;justify-content:center;font-weight:400;font-size:19px;letter-spacing:-1px;
+  position:relative;overflow:hidden;flex:0 0 auto;border:1px solid var(--re-gray-800);}
+.re::after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--stripe);}
+.org{color:var(--muted);font-size:12px;}
+h1{font-size:19px;margin:2px 0 0;font-weight:600;}
+.sec{border-top:1px solid var(--line);padding:18px 24px;}
+.sec h2{font-size:13px;margin:0 0 10px;font-weight:600;}
+.num{color:var(--muted);font-weight:400;margin-right:8px;font-size:12px;letter-spacing:.04em;}
+.idrow{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+.who{font-weight:600;}
+.verified{color:var(--success);font-size:12px;font-weight:600;white-space:nowrap;}
+label{display:block;margin:12px 0 6px;font-weight:600;font-size:13px;}
+select{width:100%;padding:11px;border-radius:10px;border:1px solid var(--input-line);
+  background:var(--card);color:var(--ink);font:inherit;}
+.ack{display:flex;align-items:flex-start;gap:9px;margin-top:16px;font-weight:400;
+  font-size:13px;color:var(--muted);}
+.ack input{margin-top:3px;flex:0 0 auto;accent-color:var(--re-indigo);}
+button{margin-top:16px;padding:12px 18px;border:0;border-radius:10px;background:var(--button-bg);
+  color:var(--button-ink);font-weight:600;font:inherit;cursor:pointer;}
+button:hover:not(:disabled){background:var(--button-hover);}
+button:disabled{opacity:.5;cursor:not-allowed;}
+.pill{display:inline-block;padding:4px 11px;border-radius:999px;font-size:12px;font-weight:600;}
+.pending{background:rgba(255,94,0,.15);color:var(--warning);}
+.ok{background:rgba(0,196,131,.16);color:var(--success);}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:7px 0;font-size:13px;
+  border-top:1px dashed var(--line);}
+.kv:first-of-type{border-top:0;}
+.k{color:var(--muted);}
+.note{color:var(--muted);font-size:12px;margin-top:10px;}
+.foot{display:flex;justify-content:space-between;color:var(--muted);font-size:11px;
+  padding:14px 24px;border-top:1px solid var(--line);gap:12px;flex-wrap:wrap;}
+</style></head><body>
+"""
+
+_PAGE_TAIL = """
+<script>
+(function(){
+  var f=document.getElementById('f'); if(!f){return;}
+  var ack=document.getElementById('ack'), go=document.getElementById('go');
+  if(ack&&go){ ack.addEventListener('change',function(){ go.disabled=!ack.checked; }); }
+  f.addEventListener('submit',function(e){
+    e.preventDefault();
+    var c=document.getElementById('campus').value, r=document.getElementById('role').value;
+    try{ window.parent.postMessage({type:'tool',payload:{toolName:'request_access',
+         params:{campus:c,role:r}}},'*'); }catch(_e){}
+    f.innerHTML='<p class="pill ok">Request for '+c+' ('+r+') filed for administrator approval.</p>';
+  });
+})();
+</script>
+</body></html>"""
 
 
 def _access_state(principal: dict) -> dict:
@@ -78,66 +158,67 @@ def render_onboarding(principal: dict, campuses, designations=SELF_SERVICE_DESIG
         ]
     text = "\n".join(lines)
 
-    # ---- MCP-UI HTML (rendered in a sandboxed iframe by capable clients) ----
+    # ---- MCP-UI HTML (sandboxed iframe on capable clients; brand-kit styled) ----
     safe_name = esc(name)
     if status["state"] == "pending":
-        campus_opts = "".join(f'<option value="{esc(c)}">{esc(c)}</option>' for c in valid_campuses)
-        desig_opts = "".join(f'<option value="{esc(v)}">{esc(l)}</option>' for v, l in designations)
-        body = f"""
-        <p class="sub">You're signed in, but you don't have campus access yet. Tell us a
-        little about you and we'll send a request to an administrator to approve.</p>
-        <form id="f">
-          <label>Which campus are you from?
-            <select id="campus" required>{campus_opts}</select></label>
-          <label>Your designation
-            <select id="role" required>{desig_opts}</select></label>
-          <button type="submit">Request access</button>
-          <p class="note">An administrator reviews every request. Access is never granted
-          automatically from this form.</p>
-        </form>
-        <script>
-          document.getElementById('f').addEventListener('submit', function (e) {{
-            e.preventDefault();
-            var campus = document.getElementById('campus').value;
-            var role = document.getElementById('role').value;
-            // MCP-UI client action: ask the host to call the request_access tool.
-            window.parent.postMessage({{ type: 'tool', payload: {{
-              toolName: 'request_access', params: {{ campus: campus, role: role }} }} }}, '*');
-            document.getElementById('f').innerHTML =
-              '<p class="ok">Thanks — your request for <b>' + campus + '</b> (' + role +
-              ') is being filed for administrator approval.</p>';
-          }});
-        </script>"""
+        campus_opts = "".join(f'<option value="{esc(c)}">{esc(c.title())}</option>'
+                              for c in valid_campuses)
+        desig_opts = "".join(f'<option value="{esc(v)}">{esc(l)}</option>'
+                             for v, l in designations)
+        sections = f"""  <div class="sec">
+    <h2><span class="num">02</span>Your affiliation</h2>
+    <p class="note">You're signed in but don't have campus access yet. Tell us a little about
+    you and we'll file a request for an administrator to approve.</p>
+    <form id="f">
+      <label for="campus">Which campus are you from?</label>
+      <select id="campus" required>{campus_opts}</select>
+      <label for="role">Your designation</label>
+      <select id="role" required>{desig_opts}</select>
+      <label class="ack"><input type="checkbox" id="ack">
+        I understand this is an access <b>request</b> and needs authorised review — selecting a
+        role here never grants it.</label>
+      <button id="go" type="submit" disabled>Request access&nbsp;→</button>
+    </form>
+  </div>
+  <div class="sec">
+    <h2><span class="num">03</span>Your access</h2>
+    <p><span class="pill pending">Academic access pending</span></p>
+    <div class="kv"><span class="k">Campus scope</span><span>Not granted</span></div>
+    <div class="kv"><span class="k">Approved role</span><span>Not granted</span></div>
+    <div class="kv"><span class="k">Latest request</span><span>Awaiting review</span></div>
+    <p class="note">An administrator reviews every request. Organisation-wide scope needs
+    explicit data-owner approval — it is never inferred from a selected designation.</p>
+  </div>"""
     else:
-        body = (f'<p class="sub">Your access: <b>{esc(status["role"])}</b> · '
-                f'<b>{esc(status["scope"])}</b>.</p>'
-                '<p class="note">You\'re all set. Ask for a student report, a cohort '
-                'overview, at-risk students, attendance, and more.</p>')
+        hint = ("Ask me for your marks, attendance, trajectory, or your report."
+                if status["state"] == "student"
+                else "You're all set — ask for a student report, a cohort overview, "
+                     "at-risk students, attendance, and more.")
+        sections = f"""  <div class="sec">
+    <h2><span class="num">02</span>Your access</h2>
+    <p><span class="pill ok">Active</span></p>
+    <div class="kv"><span class="k">Role</span><span>{esc(status['role'])}</span></div>
+    <div class="kv"><span class="k">Campus scope</span><span>{esc(status['scope'])}</span></div>
+    <p class="note">{hint}</p>
+  </div>"""
 
-    html = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Jaipuria Moodle — Welcome</title>
-<style>
-  :root {{ color-scheme: light dark; }}
-  body {{ font: 15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif; margin:0;
-          background:#0f1117; color:#e6e8ee; }}
-  .card {{ max-width:480px; margin:24px auto; padding:24px; background:#161a23;
-           border:1px solid #262c3a; border-radius:14px; }}
-  h1 {{ font-size:20px; margin:0 0 4px; }}
-  .sub {{ color:#aeb4c2; margin:0 0 18px; }}
-  label {{ display:block; margin:14px 0 6px; font-weight:600; }}
-  select {{ width:100%; padding:10px; border-radius:8px; border:1px solid #39415a;
-            background:#0f1117; color:#e6e8ee; }}
-  button {{ margin-top:18px; width:100%; padding:11px; border:0; border-radius:8px;
-            background:#4f6bff; color:#fff; font-weight:600; cursor:pointer; }}
-  .note {{ color:#8b92a3; font-size:13px; margin-top:12px; }}
-  .ok {{ color:#36d399; font-weight:600; }}
-</style></head><body><div class="card">
-  <h1>👋 Welcome, {safe_name}</h1>
-  <p class="sub">Jaipuria Moodle Analytics</p>
-  {body}
-</div></body></html>"""
+    body = f"""<div class="wrap"><div class="card">
+  <div class="stripe"></div>
+  <div class="pad head">
+    <div class="re">Re</div>
+    <div><div class="org">Jaipuria Institute of Management</div><h1>Moodle Analytics</h1></div>
+  </div>
+  <div class="sec">
+    <h2><span class="num">01</span>Your identity</h2>
+    <div class="idrow"><div class="who">👋 {safe_name}</div>
+      <div class="verified">✓ Google verified</div></div>
+  </div>
+{sections}
+  <div class="foot"><span>Institutional access review</span>
+    <span>No access from self-declared roles</span></div>
+</div></div>"""
 
+    html = _PAGE_HEAD + body + _PAGE_TAIL
     return {"html": html, "text": text, "status": status}
 
 
