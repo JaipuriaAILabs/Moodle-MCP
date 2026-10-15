@@ -159,6 +159,15 @@ async def get_authenticated_service():
         if not principal:
             raise PermissionError("missing or invalid access token")
         svc = create_service(principal)
+        # Login ledger: record the authenticated identity + resolved role/campuses (throttled,
+        # bounded, never fatal). Done here rather than only in middleware because the OAuth
+        # principal is reliably resolved inside tool execution (get_access_token) — the same
+        # principal whoami reads — but is not reliably available in the middleware layer.
+        try:
+            from security import _record_login
+            await _record_login(principal)
+        except Exception:  # noqa: BLE001 — the login ledger must never break auth
+            pass
         telemetry.end_span(span, "success", None, {"mcp.auth.mode": mode})
         telemetry.record_auth_metric(mode, "success")
         span = None

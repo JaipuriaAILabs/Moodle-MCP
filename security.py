@@ -833,9 +833,6 @@ def build_middleware(rate_limit: int, window: float):
             # only tool invocations (AIA-1210 connection counts / user-email traceability).
             # Best-effort and post-hoc: a connect is never blocked or failed by auditing.
             principal = _principal()
-            # Persist the login (email + resolved role) in the mcp_logins ledger (throttled,
-            # bounded, never fatal).
-            await _record_login(principal)
             headers = get_http_headers() or {}
             started = time.monotonic()
             result = await call_next(context)
@@ -851,9 +848,6 @@ def build_middleware(rate_limit: int, window: float):
         async def on_call_tool(self, context, call_next):
             name = getattr(context.message, "name", "?")
             principal = _principal()
-            # Login ledger (throttled): the tool path reliably has the principal. Awaited
-            # but bounded (httpx 3s) + never fatal.
-            await _record_login(principal)
             headers = get_http_headers() or {}
             started = time.monotonic()
             # Capture context — enriched into metadata only when the MCP_CAPTURE_* flags
