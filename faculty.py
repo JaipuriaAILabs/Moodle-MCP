@@ -271,6 +271,23 @@ def list_pending_requests(limit: int = 200):
         return []
 
 
+def record_login(email: str, name, role: str, campuses) -> None:
+    """Upsert a login into the mcp_logins ledger via the SECURITY DEFINER RPC: every
+    authenticated identity + the role/campuses it resolved to, with a login count and
+    last_seen. The read-only DB role has execute on the RPC but no write grant on the
+    table. Fail-safe (never raises) and meant to be called OFF the request path, since a
+    login ledger write must never slow or break a request."""
+    email = (email or "").strip().lower()
+    if not email:
+        return
+    try:
+        _sb().rpc("record_mcp_login", {
+            "p_email": email, "p_name": name or "",
+            "p_role": role or "", "p_campuses": campuses}).execute()
+    except Exception:  # noqa: BLE001 — a login nudge must never perturb traffic
+        log.warning("login ledger write failed for subject=%s", _subject(email), exc_info=True)
+
+
 def is_student(email: str) -> bool:
     """True when the email appears in the student roster.
 
