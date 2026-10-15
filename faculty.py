@@ -22,6 +22,8 @@ role — see OPERATIONS.md for the bulk-load runbook.
 import hashlib
 import logging
 
+import httpx
+
 from cache import TTLCache
 
 log = logging.getLogger("moodle-mcp.faculty")
@@ -271,19 +273,29 @@ def list_pending_requests(limit: int = 200):
         return []
 
 
-def record_login(email: str, name, role: str, campuses) -> None:
+async def record_login(email: str, name, role: str, campuses) -> None:
     """Upsert a login into the mcp_logins ledger via the SECURITY DEFINER RPC: every
     authenticated identity + the role/campuses it resolved to, with a login count and
     last_seen. The read-only DB role has execute on the RPC but no write grant on the
-    table. Fail-safe (never raises) and meant to be called OFF the request path, since a
-    login ledger write must never slow or break a request."""
+    table. Fail-safe (never raises) and called fire-and-forget OFF the request path, so a
+    ledger write never slows or breaks a request. Uses a bounded async httpx POST (not the
+    sync supabase client, which can't be driven from a background task)."""
+    from config import settings
     email = (email or "").strip().lower()
-    if not email:
+    url = settings.supabase_url.rstrip("/")
+    key = settings.data_key()
+    if not email or not url or not key:
         return
+    apikey = settings.supabase_anon_key or key
     try:
-        _sb().rpc("record_mcp_login", {
-            "p_email": email, "p_name": name or "",
-            "p_role": role or "", "p_campuses": campuses}).execute()
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.post(
+                f"{url}/rest/v1/rpc/record_mcp_login",
+                headers={"apikey": apikey, "Authorization": f"Bearer {key}",
+                         "Content-Type": "application/json"},
+                json={"p_email": email, "p_name": name or "",
+                      "p_role": role or "", "p_campuses": campuses})
+            resp.raise_for_status()
     except Exception:  # noqa: BLE001 — a login nudge must never perturb traffic
         log.warning("login ledger write failed for subject=%s", _subject(email), exc_info=True)
 

@@ -415,9 +415,9 @@ def _record_login_bg(principal) -> None:
     _login_seen[email] = now
     try:
         import faculty as _registry
-        task = asyncio.create_task(asyncio.to_thread(
-            _registry.record_login, email, principal.get("name"),
-            principal.get("role"), principal.get("campuses")))
+        task = asyncio.create_task(_registry.record_login(
+            email, principal.get("name"), principal.get("role"),
+            principal.get("campuses")))
         _login_bg_tasks.add(task)
         task.add_done_callback(_login_bg_tasks.discard)
     except Exception:  # noqa: BLE001 — a login nudge must never perturb traffic
