@@ -853,6 +853,9 @@ def build_middleware(rate_limit: int, window: float):
         async def on_call_tool(self, context, call_next):
             name = getattr(context.message, "name", "?")
             principal = _principal()
+            # Login ledger (throttled, fire-and-forget): the tool path is where the principal
+            # is reliably resolved, so this reliably captures active identities + their role.
+            _record_login_bg(principal)
             headers = get_http_headers() or {}
             started = time.monotonic()
             # Capture context — enriched into metadata only when the MCP_CAPTURE_* flags
