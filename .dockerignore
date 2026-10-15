@@ -1,5 +1,7 @@
 .git
 .github
+**/node_modules
+node_modules
 .agents
 .codex-plugin
 .mcp.json
