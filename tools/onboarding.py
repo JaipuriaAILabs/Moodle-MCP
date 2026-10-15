@@ -46,17 +46,13 @@ _PAGE_HEAD = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 :root{
   --re-black:#0a0a0a; --re-white:#ffffff; --re-lavender:#9677f8; --re-indigo:#4e44fd;
   --re-coral:#ff4859; --re-green:#00c483; --re-orange:#ff5e00; --re-gray-800:#262626;
-  color-scheme:dark light;
+  color-scheme:dark;
   --page:var(--re-black); --ink:var(--re-white); --card:#121319; --muted:#b0b0b0;
   --line:var(--re-gray-800); --input-line:#4a4a52;
   --button-bg:var(--re-indigo); --button-hover:#3c32d4; --button-ink:#ffffff;
   --success:var(--re-green); --warning:var(--re-orange);
   --stripe:linear-gradient(90deg,var(--re-lavender),var(--re-indigo),var(--re-coral),var(--re-green));
   --font:'Raleway',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
-@media (prefers-color-scheme: light){ :root:not([data-theme="dark"]){
-  --page:#f4f5f7; --ink:#0a0a0a; --card:#ffffff; --muted:#5b6170; --line:#e6e8ee; --input-line:#cfd3da; } }
-:root[data-theme="light"]{ --page:#f4f5f7; --ink:#0a0a0a; --card:#ffffff; --muted:#5b6170;
-  --line:#e6e8ee; --input-line:#cfd3da; }
 *{box-sizing:border-box}
 body{font:14px/1.6 var(--font);margin:0;background:var(--page);color:var(--ink);
   -webkit-font-smoothing:antialiased;letter-spacing:.005em;}
