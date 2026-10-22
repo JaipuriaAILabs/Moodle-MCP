@@ -78,7 +78,10 @@ $$;
 revoke all on function
   public.mcp_scope_kind(), public.mcp_scope_is_all(), public.mcp_scope_campuses_lower(),
   public.mcp_scope_batches(), public.mcp_scope_student_ids(), public.mcp_allowed_student_keys()
-  from public;
+  -- Supabase default privileges auto-GRANT execute to anon + authenticated on new public
+  -- functions; `from public` alone would leave them, so the DEFINER mcp_allowed_student_keys()
+  -- (which bypasses RLS) must be revoked from those roles too.
+  from public, anon, authenticated;
 grant execute on function
   public.mcp_scope_kind(), public.mcp_scope_is_all(), public.mcp_scope_campuses_lower(),
   public.mcp_scope_batches(), public.mcp_scope_student_ids(), public.mcp_allowed_student_keys()
