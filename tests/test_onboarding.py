@@ -84,7 +84,7 @@ print("\n[ MCP-UI resource block is well-formed ]")
 r = ui_resource(_UI_URI, "<h1>hi</h1>")
 check("is an EmbeddedResource", isinstance(r, t.EmbeddedResource))
 check("uri is ui://…", str(r.resource.uri).startswith("ui://"))
-check("mimeType text/html", r.resource.mimeType == "text/html")
+check("mimeType text/html", (getattr(r.resource,"mime_type",None) or getattr(r.resource,"mimeType",None)) == "text/html")
 try:
     ui_resource("https://evil.example/x", "<h1>no</h1>")
     check("rejects non-ui:// uri", False)
