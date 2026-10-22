@@ -17,7 +17,7 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-key")
 
 import config  # noqa: E402
 import pii  # noqa: E402
-from fastmcp.tools.tool import ToolResult  # noqa: E402
+from fastmcp.tools import ToolResult  # noqa: E402
 from mcp.types import EmbeddedResource, TextContent, TextResourceContents  # noqa: E402
 
 PASS, FAIL = 0, 0
