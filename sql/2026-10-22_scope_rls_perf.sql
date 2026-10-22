@@ -67,9 +67,9 @@ $$
   select s.run_id, s.student_id
   from public.students s
   where case (select public.mcp_scope_kind())
-          when 'student' then s.student_id = any ((select public.mcp_scope_student_ids()))
+          when 'student' then s.student_id = any ((select public.mcp_scope_student_ids())::text[])
           when 'staff'   then (select public.mcp_scope_is_all())
-                              or lower(s.campus) = any ((select public.mcp_scope_campuses_lower()))
+                              or lower(s.campus) = any ((select public.mcp_scope_campuses_lower())::text[])
           else false
         end;
 $$;
@@ -100,26 +100,33 @@ alter policy mcp_enrolments_scope on public.enrolments using (
   (run_id, student_id) in (select k.run_id, k.student_id from public.mcp_allowed_student_keys() k)
 );
 
--- onepager_narratives.run_id is TEXT (not uuid) -> cast the key.
-alter policy mcp_onepager_scope on public.onepager_narratives using (
-  (run_id, student_id) in (select k.run_id::text, k.student_id from public.mcp_allowed_student_keys() k)
-);
+-- onepager_narratives.run_id is TEXT (not uuid) -> cast the key. The table is OPTIONAL (the
+-- creating migration guards it with to_regclass), so guard the ALTER too: an unconditional ALTER
+-- on a missing table/policy would abort and roll back every policy update above.
+do $$
+begin
+  if to_regclass('public.onepager_narratives') is not null then
+    execute 'alter policy mcp_onepager_scope on public.onepager_narratives using (
+      (run_id, student_id) in (select k.run_id::text, k.student_id from public.mcp_allowed_student_keys() k)
+    )';
+  end if;
+end $$;
 
 -- students / student_reports carry student_id + campus directly -> direct check (mirrors mcp_scope_allows).
 alter policy mcp_students_scope on public.students using (
   case (select public.mcp_scope_kind())
-    when 'student' then student_id = any ((select public.mcp_scope_student_ids()))
+    when 'student' then student_id = any ((select public.mcp_scope_student_ids())::text[])
     when 'staff'   then (select public.mcp_scope_is_all())
-                        or lower(campus) = any ((select public.mcp_scope_campuses_lower()))
+                        or lower(campus) = any ((select public.mcp_scope_campuses_lower())::text[])
     else false
   end
 );
 
 alter policy mcp_student_reports_scope on public.student_reports using (
   case (select public.mcp_scope_kind())
-    when 'student' then student_id = any ((select public.mcp_scope_student_ids()))
+    when 'student' then student_id = any ((select public.mcp_scope_student_ids())::text[])
     when 'staff'   then (select public.mcp_scope_is_all())
-                        or lower(campus) = any ((select public.mcp_scope_campuses_lower()))
+                        or lower(campus) = any ((select public.mcp_scope_campuses_lower())::text[])
     else false
   end
 );
@@ -128,9 +135,9 @@ alter policy mcp_student_reports_scope on public.student_reports using (
 alter policy mcp_extraction_runs_scope on public.extraction_runs using (
   case (select public.mcp_scope_kind())
     when 'staff'   then (select public.mcp_scope_is_all())
-                        or lower(campus) = any ((select public.mcp_scope_campuses_lower()))
-    when 'student' then lower(campus) = any ((select public.mcp_scope_campuses_lower()))
-                        and batch = any ((select public.mcp_scope_batches()))
+                        or lower(campus) = any ((select public.mcp_scope_campuses_lower())::text[])
+    when 'student' then lower(campus) = any ((select public.mcp_scope_campuses_lower())::text[])
+                        and batch = any ((select public.mcp_scope_batches())::text[])
     else false
   end
 );
@@ -138,13 +145,17 @@ alter policy mcp_extraction_runs_scope on public.extraction_runs using (
 commit;
 
 -- ---------------------------------------------------------------------------
--- VERIFICATION (run after apply; set a scope header and confirm isolation + speed):
+-- VERIFICATION (run after apply; set a scope header and confirm isolation + speed).
+-- NOTE: `set local` + `set local role` are TRANSACTION-local, so the checks must run inside one
+-- transaction (begin/rollback) — statement-by-statement under autocommit would drop the scope and
+-- run the counts as the migration role, testing nothing.
+--   begin;
 --   select set_config('request.headers',
 --     json_build_object('x-mcp-scope','{"v":1,"kind":"staff","role":"campus_admin","all":false,"campuses":["lucknow"]}')::text, true);
 --   set local role reporting_readonly;
 --   select count(*) from public.marks;                 -- only lucknow marks, returns fast (<2s)
 --   select count(distinct campus) from public.students; -- expect 1 (lucknow only)
---   reset role;
+--   rollback;
 -- Cross-scope denial: with campuses=["noida"] a lucknow-only grant must return 0 lucknow rows.
 --
 -- ROLLBACK (re-point policies to the retained old per-row functions):
