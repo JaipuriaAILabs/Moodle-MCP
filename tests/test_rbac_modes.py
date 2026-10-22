@@ -229,12 +229,12 @@ check("request_access: privileged role 'admin' not self-requestable",
 
 # list_access_requests is admin-only
 faculty.list_pending_requests = lambda limit=200: [{"email": "x@jaipuria.ac.in"}]
-denied = False
-try:
-    asyncio.run(_fake.tools["list_access_requests"]())
-except PermissionError:
-    denied = True
-check("list_access_requests: denied for non-admin (pending) principal", denied)
+# A non-admin is denied gracefully (visible {ok:False, admin_only} — not a raised
+# error the host renders opaquely) and, critically, is handed NO pending data.
+_res = asyncio.run(_fake.tools["list_access_requests"]())
+check("list_access_requests: denied for non-admin (pending) principal",
+      _res.get("ok") is False and _res.get("admin_only") is True
+      and "pending" not in _res)
 
 _admin = MoodleService(None, {"name": "Admin", "email": "mansi.gambhir@jaipuria.ac.in",
                               "campuses": None, "role": "admin", "can_generate": True})

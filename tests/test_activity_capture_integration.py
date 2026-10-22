@@ -38,7 +38,7 @@ def _set(**flags):
 
 
 from fastmcp.exceptions import ToolError  # noqa: E402
-from fastmcp.tools.tool import ToolResult  # noqa: E402
+from fastmcp.tools import ToolResult  # noqa: E402  (fastmcp.tools.base; stable across 3.x/4.x)
 from mcp.types import TextContent  # noqa: E402
 
 # ==========================================================================

@@ -188,7 +188,7 @@ def render_onboarding(principal: dict, campuses, designations=SELF_SERVICE_DESIG
     <div class="kv"><span class="k">Latest request</span><span>Awaiting review</span></div>
     <p class="note">An administrator reviews every request. Organisation-wide scope needs
     explicit data-owner approval — it is never inferred from a selected designation.</p>
-  </div>"""
+  </div>"""  # nosec B608 - static MCP-UI HTML; the <select> tag trips bandit's SQL heuristic, no query here
     else:
         hint = ("Ask me for your marks, attendance, trajectory, or your report."
                 if status["state"] == "student"
