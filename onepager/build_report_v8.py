@@ -55,7 +55,7 @@ def render(d, f, n, sw):
 :root{{--ink:#0b0b0b;--plane:#f6f6f3;--grid:#e1e0d9;--axis:#c3c2b7;--surface:#fff;--muted:#0b0b0b;--ink2:#0b0b0b;--border:rgba(11,11,11,.10);--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--s6:#008300;--s7:#4a3aa7;--st-critical:#d03b3b}}
 *{{box-sizing:border-box}} @page{{size:A4;margin:0}}
 html,body{{margin:0;background:#fff;color:var(--ink);font-family:Raleway,system-ui,sans-serif;font-size:14px;line-height:1.45;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-.page{{width:210mm;height:297mm;padding:0 12mm 8mm;position:relative;overflow:hidden;background:#fff}} .p2{{break-before:page}}
+.page{{width:210mm;height:297mm;padding:0 12mm 8mm;position:relative;overflow:visible;background:#fff}} .p2{{break-before:page}}
 .band{{height:6px;margin:0 -12mm 10px;background:linear-gradient(90deg,#9677f8,#4e44fd,#ff4859,#f7c845,#00c483)}}
 .top{{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--grid);border-radius:12px;padding:8px 14px;margin-bottom:10px}}
 .brand{{display:flex;align-items:center;gap:10px}} .brand img{{width:34px;height:34px;border-radius:9px}} .brand span{{font-size:22px;font-weight:600}}

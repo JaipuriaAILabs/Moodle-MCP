@@ -34,17 +34,27 @@ def clean_comp(c):
     c = re.sub(r"\s+", " ", c.strip().rstrip(":").strip()); c = re.sub(r"^Quiz(\d)", r"Quiz \1", c); return c
 g = lambda x: f"{x:g}"
 
+# Cohort metadata — the raw extract carries none of these, so they default to the sample run.
+# Set per extraction via env instead of the hard-coded literals they replaced. (Proper fix:
+# carry campus / trimester / snapshot-date in extract.sql so they are never assumed.)
+CAMPUS = os.environ.get("REPORT_CAMPUS", "Noida")
+TRIMESTER = os.environ.get("REPORT_TRIMESTER", "1")
+DATA_DATE = os.environ.get("REPORT_DATA_DATE", "21 October 2026")
+
 def to_data(st):
     subs = []
     for s in st["subs"]:
         name = clean_subj(s["s"]); comps = []
+        if name not in TRACK:
+            raise ValueError(f"Unknown subject {name!r}: add it to TRACK in make_inputs.py "
+                             "(Finance / Marketing / Analytics & Operations / HR & People).")
         for l, o, x, c in s["cm"]:
             comps.append({"component": clean_comp(l), "kind": "CE", "you_pct": round(100*o/x, 1), "class_pct": c, "o": o, "x": x})
         if s["et"] is not None:
             comps.append({"component": "End-term exam", "kind": "ET", "you_pct": round(s["et"]/40*100, 1), "class_pct": s["etc"], "o": s["et"], "x": 40})
         subs.append({"subject": name, "track": TRACK[name], "you_pct": round(s["tot"], 1), "class_pct": s["ct"], "att_you": s["ay"], "att_class": s["ac"], "components": comps})
-    return {"student": {"id": st["id"], "name": re.sub(r"\s+", " ", st["name"]).title(), "campus": "Noida", "batch": st["batch"]}, "trimester": "1",
-            "data_date": "21 October 2026", "benchmark": "same-class average (your section)",
+    return {"student": {"id": st["id"], "name": re.sub(r"\s+", " ", st["name"]).title(), "campus": CAMPUS, "batch": st["batch"]}, "trimester": TRIMESTER,
+            "data_date": DATA_DATE, "benchmark": "same-class average (your section)",
             "tracks": ["Finance", "Marketing", "Analytics & Operations", "HR & People"],
             "store": {"ios": "https://apps.apple.com/in/app/try-rehearsal-ai/id6762619041", "android": "https://play.google.com/store/apps/details?id=ai.rehearsal.app"}, "subjects": subs}
 
@@ -96,7 +106,7 @@ Return ONLY a JSON object {{"tracks":[...]}} with {len(tracks)} items in the sam
     for _ in range(3):
         if not pr: break
         out = call(prompt(pr)); pr = check(out)
-    if pr: print("   remaining problems:", pr)
+    if pr: raise ValueError("narrative failed validation after retries: " + "; ".join(pr))
     allsubj = [s for tr in tracks for s in tr["subjects"]]
     def fmt(txt):
         txt = txt.replace("**", ""); txt = re.sub(r"(\d+)\.0%", r"\1%", txt)
@@ -148,18 +158,27 @@ def marks_pdf(d, base):
 h1{{font-size:24px;margin:6px 0 2px;font-weight:600}} .lede{{margin:0 0 10px}} h2{{font-size:17px;margin:12px 0 1px;font-weight:600}} .sub{{margin:0 0 4px}} section{{break-inside:avoid}}
 table{{border-collapse:collapse;width:100%}} th,td{{text-align:left;padding:3px 6px 3px 0;border-bottom:1px solid #cfcfc8;vertical-align:top}} th{{font-weight:600;border-bottom:2px solid #0b0b0b}} .n{{text-align:right;white-space:nowrap;padding-right:14px}} .foot{{margin-top:10px;border-top:1px solid #cfcfc8;padding-top:6px}}</style>
 <div class=top><img src="data:image/png;base64,{logo}"><span>Rehearsal</span></div><h1>{st['name']}: your marks, assignment by assignment</h1>
-<p class=lede>{st['campus']}, {st['batch'].replace('-', ' to 20')}. Trimester 1. Data taken on 21 October 2026. Each line shows your marks for one assignment or quiz next to your class average.</p>{blocks}
+<p class=lede>{st['campus']}, {st['batch'].replace('-', ' to 20')}. Trimester {TRIMESTER}. Data taken on {DATA_DATE}. Each line shows your marks for one assignment or quiz next to your class average.</p>{blocks}
 <p class=foot>Total marks are out of 100: continuous marks plus the end-term exam (out of 40). Subjects without an end-term line have continuous marks only, out of 100. Class average is your own class section. This page is for your information and does not predict placement results.</p>"""
     open(base + "-marks.html", "w").write(html); pdf(base + "-marks.html", base + "-marks.pdf")
 
 
 if __name__ == "__main__":
     raw = json.load(open(RAW)); only = sys.argv[1:]
+    failures = []
     for st in raw:
         if only and st["id"] not in only: continue
-        d = to_data(st); first = d["student"]["name"].split()[0]; base = f"{WORK}/{st['id']}"
-        json.dump(d, open(base + "-data.json", "w"), indent=1)
-        f = B.facts(d); n = narrative(d, f, first); n["tracks"] = llm_cards(d, f)
-        json.dump(n, open(base + "-narrative.json", "w"), indent=1)
-        marks_pdf(d, base); os.replace(base + "-marks.pdf", f"{OUT}/{st['id']}-marks-assignment-wise.pdf")
-        print(st["id"], d["student"]["name"], "ok")
+        try:
+            # Build everything BEFORE writing, so a failed student leaves no partial data/narrative
+            # and never ships a report (no narrative.json -> build_report_v8 skips it).
+            d = to_data(st); first = d["student"]["name"].split()[0]; base = f"{WORK}/{st['id']}"
+            f = B.facts(d); n = narrative(d, f, first); n["tracks"] = llm_cards(d, f)
+            json.dump(d, open(base + "-data.json", "w"), indent=1)
+            json.dump(n, open(base + "-narrative.json", "w"), indent=1)
+            marks_pdf(d, base); os.replace(base + "-marks.pdf", f"{OUT}/{st['id']}-marks-assignment-wise.pdf")
+            print(st["id"], d["student"]["name"], "ok")
+        except Exception as e:
+            failures.append(st["id"]); print(f"{st['id']} FAILED ({type(e).__name__}): {e} -- no report written")
+    if failures:
+        print(f"\n{len(failures)} student(s) skipped: {failures}. No flawed report was shipped; "
+              "fix the cause or re-run those ids.")
