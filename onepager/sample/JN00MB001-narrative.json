@@ -1,0 +1,37 @@
+{
+ "headline": "Hi Rohan. Here is how you did in Trimester 1.",
+ "subtitle": "This report compares your Trimester 1 performance with your class in Noida, batch 2026-28.",
+ "attendance_line": "You attended at or above class average in 6 of 7 subjects.",
+ "pattern_text": "This is the subject where your marks are furthest ahead of the class.",
+ "_model": "deepseek/deepseek-chat-v3-0324",
+ "tracks": [
+  {
+   "track": "Finance",
+   "action": "You can try solving one past quiz or case every week and past end-term questions before the exam.",
+   "why": "In **Financial Reporting and Analysis**, your Project was **70%** (class 83.6%). In **Managerial Economics**, your Group Assignment was **75%** (class 77.3%). Your Case Study in **Financial Reporting and Analysis** was **100%** (class 81.9%).",
+   "interview": "You can talk about your Case Study in **Financial Reporting and Analysis**. If asked about weak areas, you can say you now practise past quizzes, cases and end-term questions.",
+   "label": "Finance and Economics"
+  },
+  {
+   "track": "Marketing",
+   "action": "You can try making a one-page summary after each topic, and revising it before the end-term.",
+   "why": "In **Marketing Management-I**, your Project on Consumer Decision Making Process was **70%** (class 72.5%). Your STP Analysis Report was **75%** (class 72.9%).",
+   "interview": "You can talk about your STP Analysis Report in **Marketing Management-I**. If asked about weak areas, you can say you now summarise each topic and revise before the end-term.",
+   "label": "Marketing"
+  },
+  {
+   "track": "Analytics & Operations",
+   "action": "You can try writing your steps before starting each individual assignment, and solving past end-term problems before the exam.",
+   "why": "In **GenAI for Managers**, your Integrated Project was **56.7%** (class 67.8%). In **Statistics for Management**, your A1 was **91.8%** (class 77.2%).",
+   "interview": "You can talk about your A1 in **Statistics for Management**. If asked about weak areas, you can say you now plan your steps first and practise past end-term problems.",
+   "label": "Analytics and GenAI"
+  },
+  {
+   "track": "HR & People",
+   "action": "You can try reading your notes for ten minutes before every class, and revising them before the end-term.",
+   "why": "In **Critical Reading and Writing**, your Business News Analysis was **65%** (class 71.3%). In **Organisational Behaviour and Interpersonal Dynamics**, your Self Assessment was **75%** (class 77.1%). Your Quiz 2 was **100%** (class 90.5%).",
+   "interview": "You can talk about your Communication Audit in **Critical Reading and Writing**. If asked about weak areas, you can say you now read your notes before class and revise before the end-term.",
+   "label": "HR and Communication"
+  }
+ ]
+}

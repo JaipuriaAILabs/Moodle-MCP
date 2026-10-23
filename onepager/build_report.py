@@ -254,6 +254,88 @@ SCHEMA = {
                                                              "learning": {"type": "string"}, "interview": {"type": "string"}}}}}}
 
 
+def gateway_text(messages, model, response_schema=None):
+    """Send a chat prompt through our narrative gateway and return (assistant_text, usage).
+
+    Identical routing to llm_narrative: TrueFoundry AI Gateway when configured (the reviewed PII
+    guardrails attached per-request), else a direct-OpenRouter development call. Callers are
+    responsible for pseudonymising any name before calling and stitching it back after — the gateway
+    is a one-way backstop for email/phone/gov-IDs, not the person name. Prefers structured output
+    (pass response_schema) and falls back to the prompt's own JSON contract on HTTPError.
+
+    Added so the v8 card stage (make_inputs.llm_cards) reuses this exact TrueFoundry path; the v3
+    llm_narrative transport below is left unchanged.
+    """
+    def _call(with_schema):
+        _validate_truefoundry()
+        # max_tokens bounds reasoning models (e.g. gemini-flash-latest emits reasoning tokens): with
+        # no cap they exhaust the provider budget and return null content. Covers reasoning + the JSON.
+        # reasoning:low — gemini-flash-latest is a thinking model; unbounded reasoning eats the whole
+        # token budget and truncates (finish=length, null/partial content). Low effort returns the JSON
+        # directly. OpenRouter-compatible; harmless for non-reasoning models.
+        body = {"model": model, "temperature": 0.4, "stream": False, "max_tokens": 6000,
+                "reasoning": {"effort": "low"}, "messages": messages}
+        if with_schema and response_schema:
+            body["response_format"] = {"type": "json_schema", "json_schema": {"name": "report", "strict": True, "schema": response_schema}}
+        if _truefoundry_enabled():
+            # Route through the TFY AI Gateway so its PII guardrail runs on the request. OpenAI-
+            # compatible; the gateway holds the provider key. One-way backstop for email/phone/gov-IDs
+            # — the person name is kept out by the caller's pseudonym, not the gateway.
+            url = _env("TRUEFOUNDRY_BASE_URL").rstrip("/") + "/chat/completions"
+            body["model"] = _env("TRUEFOUNDRY_MODEL") or model
+            headers = {"Content-Type": "application/json",
+                       "Authorization": f"Bearer {_env('TRUEFOUNDRY_API_KEY')}",
+                       # Browser-like UA so the gateway's Cloudflare edge does not block the default
+                       # urllib client signature (HTTP 403, Cloudflare error 1010) on local/dev runs.
+                       "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"}
+            inputs = [x.strip() for x in (_env("TRUEFOUNDRY_INPUT_GUARDRAILS")).split(",") if x.strip()]
+            outputs = [x.strip() for x in (_env("TRUEFOUNDRY_OUTPUT_GUARDRAILS")).split(",") if x.strip()]
+            if _env("TRUEFOUNDRY_PROMPT_INJECTION_GUARDRAIL"):
+                inputs.append(_env("TRUEFOUNDRY_PROMPT_INJECTION_GUARDRAIL"))
+            if _env("TRUEFOUNDRY_SECRETS_GUARDRAIL"):
+                outputs.append(_env("TRUEFOUNDRY_SECRETS_GUARDRAIL"))
+            headers["X-TFY-GUARDRAILS"] = json.dumps({
+                "llm_input_guardrails": list(dict.fromkeys(inputs)),
+                "llm_output_guardrails": list(dict.fromkeys(outputs)),
+                "mcp_tool_pre_invoke_guardrails": [],
+                "mcp_tool_post_invoke_guardrails": [],
+            })
+            headers["X-TFY-METADATA"] = json.dumps({
+                "application": "moodle-mcp-onepager", "feature": "student-report",
+                "data_class": "pseudonymized-academic",
+                "prompt_version": _env("TRUEFOUNDRY_PROMPT_VERSION") or "student-report-system/1.0.0",
+            })
+            headers["X-TFY-LOGGING-CONFIG"] = json.dumps({"enabled": False})
+            headers["X-TFY-DISABLE-WEB-SEARCH"] = "true"
+            headers["X-TFY-REQUEST-TIMEOUT"] = _env("TRUEFOUNDRY_REQUEST_TIMEOUT_MS") or "60000"
+            headers["X-TFY-RETRY-CONFIG"] = json.dumps({
+                "attempts": int(_env("TRUEFOUNDRY_RETRY_ATTEMPTS") or "2"),
+                "onStatusCodes": _csv_ints(
+                    "TRUEFOUNDRY_RETRY_STATUS_CODES", "408,429,500,502,503,504"),
+                "useRetryAfterHeader": True,
+            })
+            headers["X-TFY-GUARDRAILS-SCOPE"] = "all"
+        else:
+            url = "https://openrouter.ai/api/v1/chat/completions"
+            headers = {"Authorization": f"Bearer {openrouter_key()}", "Content-Type": "application/json",
+                       "HTTP-Referer": "https://tryrehearsal.ai", "X-Title": "Jaipuria student report"}
+        req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
+        with urllib.request.urlopen(req, timeout=180) as resp:  # nosec B310
+            data = json.load(resp)
+            hdrs = dict(resp.headers.items())
+        if _truefoundry_enabled():
+            _log_tfy(hdrs, data)
+        return data
+
+    try:
+        r = _call(True)
+        txt = r["choices"][0]["message"]["content"].strip()
+    except urllib.error.HTTPError:
+        r = _call(False)
+        txt = r["choices"][0]["message"]["content"].strip()
+    return re.sub(r"^```(?:json)?\s*|\s*```$", "", txt), r.get("usage", {})
+
+
 def llm_narrative(d, f, model, feedback=None):
     # The real first name never enters any prompt. stitch_name() restores it only after generation.
     first = PSEUDONYM

@@ -1,0 +1,365 @@
+{
+ "student": {
+  "id": "JN00MB001",
+  "name": "Rohan Mehta",
+  "campus": "Noida",
+  "batch": "2026-28"
+ },
+ "trimester": "1",
+ "data_date": "21 October 2026",
+ "benchmark": "same-class average (your section)",
+ "tracks": [
+  "Finance",
+  "Marketing",
+  "Analytics & Operations",
+  "HR & People"
+ ],
+ "store": {
+  "ios": "https://apps.apple.com/in/app/try-rehearsal-ai/id6762619041",
+  "android": "https://play.google.com/store/apps/details?id=ai.rehearsal.app"
+ },
+ "subjects": [
+  {
+   "subject": "Critical Reading and Writing",
+   "track": "HR & People",
+   "you_pct": 78,
+   "class_pct": 75.9,
+   "att_you": 90.5,
+   "att_class": 85.4,
+   "components": [
+    {
+     "component": "Business News Analysis (BNA)",
+     "kind": "CE",
+     "you_pct": 65.0,
+     "class_pct": 71.3,
+     "o": 13,
+     "x": 20
+    },
+    {
+     "component": "Communication Audit",
+     "kind": "CE",
+     "you_pct": 90.0,
+     "class_pct": 77.3,
+     "o": 36,
+     "x": 40
+    },
+    {
+     "component": "Critical Analysis and Writing Exercise",
+     "kind": "CE",
+     "you_pct": 70.0,
+     "class_pct": 74.8,
+     "o": 21,
+     "x": 30
+    },
+    {
+     "component": "Propaganda Wars",
+     "kind": "CE",
+     "you_pct": 80.0,
+     "class_pct": 83.1,
+     "o": 8,
+     "x": 10
+    }
+   ]
+  },
+  {
+   "subject": "Financial Reporting and Analysis",
+   "track": "Finance",
+   "you_pct": 84,
+   "class_pct": 72.3,
+   "att_you": 95.2,
+   "att_class": 87,
+   "components": [
+    {
+     "component": "Case Study",
+     "kind": "CE",
+     "you_pct": 100.0,
+     "class_pct": 81.9,
+     "o": 10,
+     "x": 10
+    },
+    {
+     "component": "Project",
+     "kind": "CE",
+     "you_pct": 70.0,
+     "class_pct": 83.6,
+     "o": 14,
+     "x": 20
+    },
+    {
+     "component": "Quiz 1",
+     "kind": "CE",
+     "you_pct": 90.0,
+     "class_pct": 72.4,
+     "o": 9,
+     "x": 10
+    },
+    {
+     "component": "Quiz 2",
+     "kind": "CE",
+     "you_pct": 90.0,
+     "class_pct": 75.8,
+     "o": 9,
+     "x": 10
+    },
+    {
+     "component": "Quiz 3",
+     "kind": "CE",
+     "you_pct": 70.0,
+     "class_pct": 65.7,
+     "o": 7,
+     "x": 10
+    },
+    {
+     "component": "End-term exam",
+     "kind": "ET",
+     "you_pct": 87.5,
+     "class_pct": 64.9,
+     "o": 35,
+     "x": 40
+    }
+   ]
+  },
+  {
+   "subject": "GenAI for Managers",
+   "track": "Analytics & Operations",
+   "you_pct": 78,
+   "class_pct": 74.8,
+   "att_you": 90.9,
+   "att_class": 88.5,
+   "components": [
+    {
+     "component": "Final Capstone",
+     "kind": "CE",
+     "you_pct": 82.5,
+     "class_pct": 79.4,
+     "o": 33,
+     "x": 40
+    },
+    {
+     "component": "Integrated Project",
+     "kind": "CE",
+     "you_pct": 56.7,
+     "class_pct": 67.8,
+     "o": 17,
+     "x": 30
+    },
+    {
+     "component": "Quiz 1",
+     "kind": "CE",
+     "you_pct": 86.7,
+     "class_pct": 63.7,
+     "o": 13,
+     "x": 15
+    },
+    {
+     "component": "Quiz 2",
+     "kind": "CE",
+     "you_pct": 100.0,
+     "class_pct": 87.6,
+     "o": 15,
+     "x": 15
+    }
+   ]
+  },
+  {
+   "subject": "Managerial Economics",
+   "track": "Finance",
+   "you_pct": 77,
+   "class_pct": 66.3,
+   "att_you": 85.7,
+   "att_class": 87.7,
+   "components": [
+    {
+     "component": "Case Analysis",
+     "kind": "CE",
+     "you_pct": 90.0,
+     "class_pct": 77.1,
+     "o": 9,
+     "x": 10
+    },
+    {
+     "component": "Group Assignment",
+     "kind": "CE",
+     "you_pct": 75.0,
+     "class_pct": 77.3,
+     "o": 15,
+     "x": 20
+    },
+    {
+     "component": "Quiz 1",
+     "kind": "CE",
+     "you_pct": 90.0,
+     "class_pct": 61.2,
+     "o": 9,
+     "x": 10
+    },
+    {
+     "component": "Quiz 2",
+     "kind": "CE",
+     "you_pct": 70.0,
+     "class_pct": 61.4,
+     "o": 7,
+     "x": 10
+    },
+    {
+     "component": "Role Play",
+     "kind": "CE",
+     "you_pct": 80.0,
+     "class_pct": 70,
+     "o": 8,
+     "x": 10
+    },
+    {
+     "component": "End-term exam",
+     "kind": "ET",
+     "you_pct": 72.5,
+     "class_pct": 59.6,
+     "o": 29,
+     "x": 40
+    }
+   ]
+  },
+  {
+   "subject": "Marketing Management-I",
+   "track": "Marketing",
+   "you_pct": 71,
+   "class_pct": 63.6,
+   "att_you": 100,
+   "att_class": 85.1,
+   "components": [
+    {
+     "component": "Project on Consumer Decision Making Process (Integrated Project: AI-based assessment)",
+     "kind": "CE",
+     "you_pct": 70.0,
+     "class_pct": 72.5,
+     "o": 14,
+     "x": 20
+    },
+    {
+     "component": "Quiz",
+     "kind": "CE",
+     "you_pct": 65.0,
+     "class_pct": 60,
+     "o": 13,
+     "x": 20
+    },
+    {
+     "component": "STP Analysis Report",
+     "kind": "CE",
+     "you_pct": 75.0,
+     "class_pct": 72.9,
+     "o": 15,
+     "x": 20
+    },
+    {
+     "component": "End-term exam",
+     "kind": "ET",
+     "you_pct": 72.5,
+     "class_pct": 56.4,
+     "o": 29,
+     "x": 40
+    }
+   ]
+  },
+  {
+   "subject": "Organisational Behaviour and Interpersonal Dynamics",
+   "track": "HR & People",
+   "you_pct": 84,
+   "class_pct": 68.8,
+   "att_you": 90.5,
+   "att_class": 87.2,
+   "components": [
+    {
+     "component": "Quiz 1",
+     "kind": "CE",
+     "you_pct": 80.0,
+     "class_pct": 72.7,
+     "o": 4,
+     "x": 5
+    },
+    {
+     "component": "Quiz 2",
+     "kind": "CE",
+     "you_pct": 100.0,
+     "class_pct": 90.5,
+     "o": 5,
+     "x": 5
+    },
+    {
+     "component": "Self Assessment",
+     "kind": "CE",
+     "you_pct": 75.0,
+     "class_pct": 77.1,
+     "o": 15,
+     "x": 20
+    },
+    {
+     "component": "Solving Contemporary Workplace Challenges through OB Lens",
+     "kind": "CE",
+     "you_pct": 90.0,
+     "class_pct": 82,
+     "o": 27,
+     "x": 30
+    },
+    {
+     "component": "End-term exam",
+     "kind": "ET",
+     "you_pct": 82.5,
+     "class_pct": 51.4,
+     "o": 33,
+     "x": 40
+    }
+   ]
+  },
+  {
+   "subject": "Statistics for Management",
+   "track": "Analytics & Operations",
+   "you_pct": 89.2,
+   "class_pct": 67.1,
+   "att_you": 90.5,
+   "att_class": 86.9,
+   "components": [
+    {
+     "component": "A1",
+     "kind": "CE",
+     "you_pct": 91.8,
+     "class_pct": 77.2,
+     "o": 4.59,
+     "x": 5
+    },
+    {
+     "component": "A2",
+     "kind": "CE",
+     "you_pct": 90.0,
+     "class_pct": 72,
+     "o": 9,
+     "x": 10
+    },
+    {
+     "component": "A3",
+     "kind": "CE",
+     "you_pct": 90.0,
+     "class_pct": 75.7,
+     "o": 22.49,
+     "x": 25
+    },
+    {
+     "component": "Quiz 1&2",
+     "kind": "CE",
+     "you_pct": 90.9,
+     "class_pct": 70.1,
+     "o": 18.17,
+     "x": 20
+    },
+    {
+     "component": "End-term exam",
+     "kind": "ET",
+     "you_pct": 87.5,
+     "class_pct": 57.8,
+     "o": 35,
+     "x": 40
+    }
+   ]
+  }
+ ]
+}
