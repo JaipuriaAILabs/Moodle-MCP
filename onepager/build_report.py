@@ -13,7 +13,7 @@ data.json: {student:{id,name,campus,batch}, trimester, data_date, benchmark, tra
             components:[{component, kind, you_pct, class_pct}]}]}
 The model writes prose only; every number is computed here and checked.
 """
-import argparse, base64, io, json, os, re, sys, urllib.request
+import argparse, base64, io, json, os, re, ssl, sys, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ASSETS = os.path.join(HERE, "assets")
@@ -28,6 +28,22 @@ _REPO_ROOT = os.path.dirname(HERE)
 ENV_FILES = [os.environ.get("OPENROUTER_ENV", ""), ".env",
              os.path.join(_REPO_ROOT, ".env.truefoundry.local"),
              os.path.join(_REPO_ROOT, ".env")]
+
+
+def _ssl_context():
+    """TLS trust store for the gateway HTTPS calls. Prefer certifi's CA bundle — the stock
+    macOS/dev Python has no system trust store, so urlopen otherwise dies with
+    'CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate' (surfacing as the vague
+    URLError that masked the real cause). Fall back to the system default context when certifi is
+    unavailable (e.g. a minimal production image that ships its own CA roots)."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:  # noqa: BLE001 — never let trust-store setup break a report; use system default
+        return ssl.create_default_context()
+
+
+_SSL_CONTEXT = _ssl_context()
 
 
 # ----------------------------------------------------------------------------- facts
@@ -322,7 +338,7 @@ def gateway_text(messages, model, response_schema=None):
             headers = {"Authorization": f"Bearer {openrouter_key()}", "Content-Type": "application/json",
                        "HTTP-Referer": "https://tryrehearsal.ai", "X-Title": "Jaipuria student report"}
         req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
-        with urllib.request.urlopen(req, timeout=180) as resp:  # nosec B310
+        with urllib.request.urlopen(req, timeout=180, context=_SSL_CONTEXT) as resp:  # nosec B310
             data = json.load(resp)
             hdrs = dict(resp.headers.items())
         if _truefoundry_enabled():
@@ -335,16 +351,18 @@ def gateway_text(messages, model, response_schema=None):
         except (KeyError, IndexError, TypeError, AttributeError):
             return ""
 
-    # Real model fallback chain. Primary model, then TRUEFOUNDRY_FALLBACK_MODELS (DeepSeek V3, then a
-    # cheap OpenAI model) are each tried IN ORDER on ANY failure: HTTP error, connection/SSL drop,
-    # timeout, or empty/null content (a reasoning blow-up). A transient connection/SSL drop on one
-    # model gets one quick retry before moving on. Every attempt still goes through the SAME TFY
-    # gateway, so the guardrails run on each model. Set TRUEFOUNDRY_FALLBACK_MODELS to the exact
-    # slugs available in your TFY catalog (empty string disables fallback).
+    # Real model fallback chain. Primary model, then TRUEFOUNDRY_FALLBACK_MODELS are each tried IN
+    # ORDER on ANY failure: HTTP error, connection/SSL drop, timeout, or empty/null content (a
+    # reasoning blow-up). A transient connection/SSL drop on one model gets one quick retry before
+    # moving on. Every attempt still goes through the SAME TFY gateway, so the guardrails run on each
+    # model. The default fallback is the one secondary model this tenant authorises
+    # (deepseek-v4-flash, verified via GET /models); set TRUEFOUNDRY_FALLBACK_MODELS to the exact
+    # slugs your own TFY catalog grants (comma-separated; an unauthorised slug just 403s and is
+    # skipped, empty string disables fallback entirely).
     primary = (_env("TRUEFOUNDRY_MODEL") if _truefoundry_enabled() else "") or model
     fb_raw = _env("TRUEFOUNDRY_FALLBACK_MODELS")
     if fb_raw is None:
-        fb_raw = "openrouter/deepseek/deepseek-chat,openrouter/openai/gpt-4o-mini"
+        fb_raw = "openrouter/deepseek-deepseek-v4-flash-latest"
     chain, seen = [], set()
     for m in [primary] + [x.strip() for x in fb_raw.split(",") if x.strip()]:
         if m and m not in seen:
@@ -364,9 +382,9 @@ def gateway_text(messages, model, response_schema=None):
                     print(f"[gateway] fell back to model={use_model} (attempt {attempt+1})", file=sys.stderr)
                 return re.sub(r"^```(?:json)?\s*|\s*```$", "", txt), r.get("usage", {})
             except urllib.error.HTTPError as e:   # plain call also 4xx/5xx -> next model
-                errors.append(f"{use_model}: HTTP {e.code}"); break
+                errors.append(f"{use_model}: HTTP {e.code} {e.reason}"); break
             except urllib.error.URLError as e:    # connection/SSL/timeout -> retry this model once
-                errors.append(f"{use_model} a{attempt+1}: {type(e).__name__}"); continue
+                errors.append(f"{use_model} a{attempt+1}: {type(e).__name__}: {getattr(e, 'reason', '')}"); continue
             except Exception as e:  # noqa: BLE001 — empty content / parse -> next model
                 errors.append(f"{use_model}: {type(e).__name__}"); break
     raise RuntimeError("all report models failed: " + "; ".join(errors[-6:]))
@@ -456,7 +474,7 @@ BANNED anywhere in track text (title, learning, interview): digits, "%", "score"
         # Both URLs are fixed, code-owned HTTPS endpoints; neither user input nor report data can
         # alter the scheme or host (reviewed B310 call).
         req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
-        with urllib.request.urlopen(req, timeout=180) as resp:  # nosec B310
+        with urllib.request.urlopen(req, timeout=180, context=_SSL_CONTEXT) as resp:  # nosec B310
             data = json.load(resp)
             hdrs = dict(resp.headers.items())
         if _truefoundry_enabled():

@@ -196,6 +196,12 @@ def _process(d, sid):
     Build everything BEFORE writing, so a failed student leaves no partial data/narrative and never
     ships a report (no narrative.json -> build_report_v8 skips it)."""
     first = d["student"]["name"].split()[0]; base = f"{WORK}/{sid}"
+    # Clear any narrative.json from a PREVIOUS run before building. Build-then-write guards partial
+    # writes WITHIN this run, but a leftover narrative.json from an earlier successful run would be
+    # rendered silently if this run fails to regenerate it — shipping a stale report. Removing it
+    # first guarantees "narrative failed -> no narrative.json -> renderer skips this student".
+    try: os.remove(base + "-narrative.json")
+    except FileNotFoundError: pass
     f = B.facts(d); n = narrative(d, f, first); n["tracks"] = llm_cards(d, f)
     json.dump(d, open(base + "-data.json", "w"), indent=1)
     json.dump(n, open(base + "-narrative.json", "w"), indent=1)
