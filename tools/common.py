@@ -190,6 +190,13 @@ def paged(query_factory, page: int = 1000, cap: int = 100000):
     return out
 
 
+# STABLE PAGINATION: order every paged query by its full primary key. PostgREST range() paging has
+# no guaranteed row order between successive requests, so across the many pages of a cohort scan a
+# boundary row can be returned twice (or skipped) — silently and NON-deterministically corrupting
+# cohort means/counts (verified live: a student's attendance flipped 60.0%<->61.9% between runs).
+# run_id is already fixed by .eq, so ordering by the remaining PK columns gives a total, stable order
+# (each row returned exactly once). PK(marks)=(run_id,student_id,course_id,kind,component_label);
+# PK(attendance_sessions)=(run_id,student_id,course_id,session_key). The PK index backs the sort.
 def marks_for(svc, run_id, *, student_id=None, course_ids=None):
     def factory(off, lim):
         q = (svc.client.table(MARKS)
@@ -199,7 +206,9 @@ def marks_for(svc, run_id, *, student_id=None, course_ids=None):
             q = q.eq("student_id", student_id)
         if course_ids is not None:
             q = q.in_("course_id", course_ids)
-        return (svc.apply_student(q).range(off, off + lim - 1).execute()).data or []
+        return (svc.apply_student(q)
+                .order("student_id").order("course_id").order("kind").order("component_label")
+                .range(off, off + lim - 1).execute()).data or []
     return paged(factory)
 
 
@@ -211,7 +220,9 @@ def attendance_for(svc, run_id, *, student_id=None, course_ids=None):
             q = q.eq("student_id", student_id)
         if course_ids is not None:
             q = q.in_("course_id", course_ids)
-        return (svc.apply_student(q).range(off, off + lim - 1).execute()).data or []
+        return (svc.apply_student(q)
+                .order("student_id").order("course_id").order("session_key")
+                .range(off, off + lim - 1).execute()).data or []
     return paged(factory)
 
 
@@ -276,11 +287,52 @@ def scope_marks(svc, run_id, course_ids):
 
 def cohort_rollup(svc, run_id, courses) -> dict:
     """Per-student rollup from the raw tables for a scope: overall graded-mark %, recorded zeros,
-    overall attendance %, and subjects below 75% attendance. Cached per (run, trimester-set)."""
+    overall attendance %, and subjects below 75% attendance. Cached per (run, trimester-set).
+
+    Prefers the server-side aggregate RPC (public.mcp_cohort_rollup) — one grouped query instead of
+    pulling every marks + attendance row (~280k on a live cohort, ~24s cold). Falls back to the
+    in-Python aggregation when the RPC is unavailable (un-migrated DB) or errors, so this is safe to
+    deploy before the migration is applied."""
     key = (run_id, tuple(sorted(courses)), svc.self_student_id)  # self-scope segregates the cache
     hit = _rollup_cache.get(key)
     if hit is not None:
         return hit
+    out = _cohort_rollup_rpc(svc, run_id, courses)
+    if out is None:
+        out = _cohort_rollup_python(svc, run_id, courses)
+    _rollup_cache.set(key, out)
+    return out
+
+
+def _cohort_rollup_rpc(svc, run_id, courses):
+    """One server-side aggregate (public.mcp_cohort_rollup) -> the same dict as the Python path, or
+    None to fall back (RPC missing on an un-migrated DB, or any error). Scope matches the app layer:
+    the already campus-scoped course_ids plus, for a student, that student's own enrolment ids."""
+    try:
+        resp = svc.client.rpc("mcp_cohort_rollup", {
+            "p_run_id": run_id,
+            "p_course_ids": list(courses),
+            "p_self_student_ids": svc.self_student_ids,  # None for faculty -> whole cohort
+        }).execute()
+    except Exception:  # noqa: BLE001 — any RPC failure degrades to the raw-row aggregation
+        return None
+    data = getattr(resp, "data", None)
+    if not isinstance(data, dict):
+        return None
+    out = {}
+    for sid, r in data.items():
+        low = [(courses.get(e.get("course_id"), {}).get("subject"), e.get("ap"))
+               for e in (r.get("low_attendance") or [])]
+        out[sid] = {"name": r.get("name") or sid,
+                    "mark_pct": r.get("mark_pct"),
+                    "zeros": [z for z in (r.get("zeros") or []) if z][:8],
+                    "attendance_pct": r.get("attendance_pct"),
+                    "low_attendance_subjects": low}
+    return out
+
+
+def _cohort_rollup_python(svc, run_id, courses) -> dict:
+    """Fallback: fetch raw marks + attendance and aggregate per student in Python."""
     cids = list(courses)
     names_q = svc.apply_student(svc.client.table("students")  # student -> self only
                                .select("student_id,student_name").eq("run_id", run_id))
@@ -311,5 +363,4 @@ def cohort_rollup(svc, run_id, courses) -> dict:
                     "zeros": [z for z in a["zeros"] if z][:8],
                     "attendance_pct": (round(100 * pres / len(att_all), 1) if att_all else None),
                     "low_attendance_subjects": low_subj}
-    _rollup_cache.set(key, out)
     return out

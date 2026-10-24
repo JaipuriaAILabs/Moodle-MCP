@@ -11,13 +11,18 @@ select cron.schedule(
   $$select public.purge_expired_mcp_security_data();$$
 );
 
--- 2) External /health keepalive — every 10 min (live: cron.job id 1). Documented here so
---    it isn't silently lost; the authoritative uptime signal is an external /health check
---    with failure alerting (plus Cloudflare Workers request/error rates), not this ping.
+-- 2) Reports-backend warm ping — every 10 min (live: jobname 'agent-keepwarm'). Keeps
+--    reports.tryrehearsal.ai from spinning down so the first create_report does not cold-start.
+--    The authoritative uptime signal is still an external /health check with failure alerting,
+--    not this ping. Re-apply (idempotent) if lost:
 -- select cron.schedule(
---   'mcp-health-keepalive', '*/10 * * * *',
---   $$select net.http_get(url := 'https://moodle-mcp.tryrehearsal.ai/health', timeout_milliseconds := 5000);$$
+--   'agent-keepwarm', '*/10 * * * *',
+--   $$select net.http_get(url := 'https://reports.tryrehearsal.ai/health', timeout_milliseconds := 5000);$$
 -- );
+--
+-- NOTE (2026-10-24): the former MCP warmer ('mcp-keepwarm' / 'mcp-health-keepalive' against
+--   moodle-mcp.tryrehearsal.ai) was unscheduled — the MCP runs on a paid always-on plan, so the
+--   ping was redundant. Do NOT re-add it.
 
 -- FOLLOW-UP (gap G18): the mcp_audit.tool_calls partitions are pre-created through 2027-07-01
 -- (sql/2026-09-18_mcp_audit_backend.sql) with a `default` catch-all after that. Add a

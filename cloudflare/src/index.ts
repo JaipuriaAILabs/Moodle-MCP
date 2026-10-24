@@ -56,8 +56,8 @@ interface Env {
 export class MoodleMcpContainer extends Container<Env> {
   // uvicorn binds ${PORT:-8000}; CF injects no $PORT, so the app listens on 8000.
   defaultPort = 8000;
-  // Keep the single stateful instance warm so cold `initialize` stays under the 2s acceptance
-  // criterion. Pair with a keepalive cron hitting /health (see README) for a hard guarantee.
+  // Keep the single stateful instance resident so cold `initialize` stays under the 2s
+  // acceptance criterion. The long sleepAfter below is the guarantee; no external pinger is used.
   sleepAfter = "6h";
 
   constructor(ctx: DurableObjectState<{}>, env: Env) {

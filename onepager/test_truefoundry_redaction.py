@@ -66,7 +66,7 @@ class _Resp:
         return False
 
 
-def _fake_urlopen(req, timeout=None):
+def _fake_urlopen(req, timeout=None, **kwargs):   # **kwargs absorbs context=_SSL_CONTEXT
     CAP["url"] = req.full_url
     CAP["data"] = req.data.decode()
     CAP["headers"] = {k.lower(): v for k, v in req.headers.items()}

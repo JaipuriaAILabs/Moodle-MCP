@@ -1,3 +1,4 @@
 supabase>=2.5.0     # fetch_student.py (same client the server uses)
 qrcode>=8.2         # optional: App Store / Google Play QR codes in the footer
 pillow>=10.0        # qrcode's image backend
+certifi>=2023.7.22  # CA bundle for the gateway TLS calls (build_report._ssl_context)

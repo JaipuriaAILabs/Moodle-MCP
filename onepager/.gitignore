@@ -1,3 +1,6 @@
 out/
 sample_out/
+work/
+.venv/
+__pycache__/
 *.pdf

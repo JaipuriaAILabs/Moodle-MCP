@@ -13,7 +13,7 @@ data.json: {student:{id,name,campus,batch}, trimester, data_date, benchmark, tra
             components:[{component, kind, you_pct, class_pct}]}]}
 The model writes prose only; every number is computed here and checked.
 """
-import argparse, base64, io, json, os, re, sys, urllib.request
+import argparse, base64, io, json, os, re, ssl, sys, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ASSETS = os.path.join(HERE, "assets")
@@ -28,6 +28,22 @@ _REPO_ROOT = os.path.dirname(HERE)
 ENV_FILES = [os.environ.get("OPENROUTER_ENV", ""), ".env",
              os.path.join(_REPO_ROOT, ".env.truefoundry.local"),
              os.path.join(_REPO_ROOT, ".env")]
+
+
+def _ssl_context():
+    """TLS trust store for the gateway HTTPS calls. Prefer certifi's CA bundle — the stock
+    macOS/dev Python has no system trust store, so urlopen otherwise dies with
+    'CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate' (surfacing as the vague
+    URLError that masked the real cause). Fall back to the system default context when certifi is
+    unavailable (e.g. a minimal production image that ships its own CA roots)."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:  # noqa: BLE001 — never let trust-store setup break a report; use system default
+        return ssl.create_default_context()
+
+
+_SSL_CONTEXT = _ssl_context()
 
 
 # ----------------------------------------------------------------------------- facts
@@ -254,6 +270,126 @@ SCHEMA = {
                                                              "learning": {"type": "string"}, "interview": {"type": "string"}}}}}}
 
 
+def gateway_text(messages, model, response_schema=None):
+    """Send a chat prompt through our narrative gateway and return (assistant_text, usage).
+
+    Identical routing to llm_narrative: TrueFoundry AI Gateway when configured (the reviewed PII
+    guardrails attached per-request), else a direct-OpenRouter development call. Callers are
+    responsible for pseudonymising any name before calling and stitching it back after — the gateway
+    is a one-way backstop for email/phone/gov-IDs, not the person name. Prefers structured output
+    (pass response_schema) and falls back to the prompt's own JSON contract on HTTPError.
+
+    Added so the v8 card stage (make_inputs.llm_cards) reuses this exact TrueFoundry path; the v3
+    llm_narrative transport below is left unchanged.
+    """
+    def _call(use_model, with_schema):
+        _validate_truefoundry()
+        # max_tokens bounds reasoning models (e.g. gemini-flash-latest emits reasoning tokens): with
+        # no cap they exhaust the provider budget and return null content. Covers reasoning + the JSON.
+        # reasoning:low — gemini-flash-latest is a thinking model; unbounded reasoning eats the whole
+        # token budget and truncates (finish=length, null/partial content). Low effort returns the JSON
+        # directly. OpenRouter-compatible; harmless for non-reasoning models.
+        body = {"model": use_model, "temperature": 0.4, "stream": False, "max_tokens": 6000,
+                "reasoning": {"effort": "low"}, "messages": messages}
+        if with_schema and response_schema:
+            body["response_format"] = {"type": "json_schema", "json_schema": {"name": "report", "strict": True, "schema": response_schema}}
+        if _truefoundry_enabled():
+            # Route through the TFY AI Gateway so its PII guardrail runs on the request. OpenAI-
+            # compatible; the gateway holds the provider key. One-way backstop for email/phone/gov-IDs
+            # — the person name is kept out by the caller's pseudonym, not the gateway.
+            # NOTE: body["model"] stays as use_model (this attempt's model in the fallback chain).
+            # It is NOT forced to TRUEFOUNDRY_MODEL here — doing so collapsed every fallback back to
+            # the same model, so a model/provider failure had no real fallback.
+            url = _env("TRUEFOUNDRY_BASE_URL").rstrip("/") + "/chat/completions"
+            headers = {"Content-Type": "application/json",
+                       "Authorization": f"Bearer {_env('TRUEFOUNDRY_API_KEY')}",
+                       # Browser-like UA so the gateway's Cloudflare edge does not block the default
+                       # urllib client signature (HTTP 403, Cloudflare error 1010) on local/dev runs.
+                       "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"}
+            inputs = [x.strip() for x in (_env("TRUEFOUNDRY_INPUT_GUARDRAILS")).split(",") if x.strip()]
+            outputs = [x.strip() for x in (_env("TRUEFOUNDRY_OUTPUT_GUARDRAILS")).split(",") if x.strip()]
+            if _env("TRUEFOUNDRY_PROMPT_INJECTION_GUARDRAIL"):
+                inputs.append(_env("TRUEFOUNDRY_PROMPT_INJECTION_GUARDRAIL"))
+            if _env("TRUEFOUNDRY_SECRETS_GUARDRAIL"):
+                outputs.append(_env("TRUEFOUNDRY_SECRETS_GUARDRAIL"))
+            headers["X-TFY-GUARDRAILS"] = json.dumps({
+                "llm_input_guardrails": list(dict.fromkeys(inputs)),
+                "llm_output_guardrails": list(dict.fromkeys(outputs)),
+                "mcp_tool_pre_invoke_guardrails": [],
+                "mcp_tool_post_invoke_guardrails": [],
+            })
+            headers["X-TFY-METADATA"] = json.dumps({
+                "application": "moodle-mcp-onepager", "feature": "student-report",
+                "data_class": "pseudonymized-academic",
+                "prompt_version": _env("TRUEFOUNDRY_PROMPT_VERSION") or "student-report-system/1.0.0",
+            })
+            headers["X-TFY-LOGGING-CONFIG"] = json.dumps({"enabled": False})
+            headers["X-TFY-DISABLE-WEB-SEARCH"] = "true"
+            headers["X-TFY-REQUEST-TIMEOUT"] = _env("TRUEFOUNDRY_REQUEST_TIMEOUT_MS") or "60000"
+            headers["X-TFY-RETRY-CONFIG"] = json.dumps({
+                "attempts": int(_env("TRUEFOUNDRY_RETRY_ATTEMPTS") or "2"),
+                "onStatusCodes": _csv_ints(
+                    "TRUEFOUNDRY_RETRY_STATUS_CODES", "408,429,500,502,503,504"),
+                "useRetryAfterHeader": True,
+            })
+            headers["X-TFY-GUARDRAILS-SCOPE"] = "all"
+        else:
+            url = "https://openrouter.ai/api/v1/chat/completions"
+            headers = {"Authorization": f"Bearer {openrouter_key()}", "Content-Type": "application/json",
+                       "HTTP-Referer": "https://tryrehearsal.ai", "X-Title": "Jaipuria student report"}
+        req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
+        with urllib.request.urlopen(req, timeout=180, context=_SSL_CONTEXT) as resp:  # nosec B310
+            data = json.load(resp)
+            hdrs = dict(resp.headers.items())
+        if _truefoundry_enabled():
+            _log_tfy(hdrs, data)
+        return data
+
+    def _content(data):
+        try:
+            return (data["choices"][0]["message"].get("content") or "").strip()
+        except (KeyError, IndexError, TypeError, AttributeError):
+            return ""
+
+    # Real model fallback chain. Primary model, then TRUEFOUNDRY_FALLBACK_MODELS are each tried IN
+    # ORDER on ANY failure: HTTP error, connection/SSL drop, timeout, or empty/null content (a
+    # reasoning blow-up). A transient connection/SSL drop on one model gets one quick retry before
+    # moving on. Every attempt still goes through the SAME TFY gateway, so the guardrails run on each
+    # model. The default fallback is the one secondary model this tenant authorises
+    # (deepseek-v4-flash, verified via GET /models); set TRUEFOUNDRY_FALLBACK_MODELS to the exact
+    # slugs your own TFY catalog grants (comma-separated; an unauthorised slug just 403s and is
+    # skipped, empty string disables fallback entirely).
+    primary = (_env("TRUEFOUNDRY_MODEL") if _truefoundry_enabled() else "") or model
+    fb_raw = _env("TRUEFOUNDRY_FALLBACK_MODELS")
+    if fb_raw is None:
+        fb_raw = "openrouter/deepseek-deepseek-v4-flash-latest"
+    chain, seen = [], set()
+    for m in [primary] + [x.strip() for x in fb_raw.split(",") if x.strip()]:
+        if m and m not in seen:
+            seen.add(m); chain.append(m)
+    errors = []
+    for idx, use_model in enumerate(chain):
+        for attempt in range(2):  # one retry on a transient connection/SSL drop for the same model
+            try:
+                try:
+                    r = _call(use_model, True)
+                except urllib.error.HTTPError:
+                    r = _call(use_model, False)  # model/gateway rejected the json_schema -> retry plain
+                txt = _content(r)
+                if not txt:
+                    raise ValueError("empty/null content")
+                if idx or attempt:
+                    print(f"[gateway] fell back to model={use_model} (attempt {attempt+1})", file=sys.stderr)
+                return re.sub(r"^```(?:json)?\s*|\s*```$", "", txt), r.get("usage", {})
+            except urllib.error.HTTPError as e:   # plain call also 4xx/5xx -> next model
+                errors.append(f"{use_model}: HTTP {e.code} {e.reason}"); break
+            except urllib.error.URLError as e:    # connection/SSL/timeout -> retry this model once
+                errors.append(f"{use_model} a{attempt+1}: {type(e).__name__}: {getattr(e, 'reason', '')}"); continue
+            except Exception as e:  # noqa: BLE001 — empty content / parse -> next model
+                errors.append(f"{use_model}: {type(e).__name__}"); break
+    raise RuntimeError("all report models failed: " + "; ".join(errors[-6:]))
+
+
 def llm_narrative(d, f, model, feedback=None):
     # The real first name never enters any prompt. stitch_name() restores it only after generation.
     first = PSEUDONYM
@@ -338,7 +474,7 @@ BANNED anywhere in track text (title, learning, interview): digits, "%", "score"
         # Both URLs are fixed, code-owned HTTPS endpoints; neither user input nor report data can
         # alter the scheme or host (reviewed B310 call).
         req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
-        with urllib.request.urlopen(req, timeout=180) as resp:  # nosec B310
+        with urllib.request.urlopen(req, timeout=180, context=_SSL_CONTEXT) as resp:  # nosec B310
             data = json.load(resp)
             hdrs = dict(resp.headers.items())
         if _truefoundry_enabled():

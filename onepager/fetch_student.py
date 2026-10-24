@@ -39,6 +39,12 @@ DEFAULT_TRACK = "General management"
 STORE = {"ios": "https://apps.apple.com/in/app/try-rehearsal-ai/id6762619041",
          "android": "https://play.google.com/store/apps/details?id=ai.rehearsal.app"}
 
+# The end-term (kind "ET" / "__total__") row is stored with a NULL max_score (see
+# tools/students.py), so its percentage can only be computed against a fixed denominator.
+# The programme convention is an end-term out of 40 (matches the kit's make_inputs.to_data);
+# override per cohort with REPORT_ENDTERM_MAX if a batch/trimester uses a different maximum.
+ENDTERM_MAX = float(os.environ.get("REPORT_ENDTERM_MAX", "40"))
+
 
 def client():
     url = os.environ.get("SUPABASE_URL", "")
@@ -116,13 +122,30 @@ def main():
         sys.exit(f"student {a.student} not in run for {a.campus}/{a.batch}")
     name = " ".join(w.capitalize() for w in (stu[0].get("student_name") or a.student).split())
 
+    # STABLE PAGINATION: every paged query MUST order by its full primary key. PostgREST range()
+    # paging over an unordered result set has no guaranteed row order between successive requests,
+    # so across the ~37 pages of a cohort's marks/attendance a boundary row can be returned twice
+    # (or skipped) — which silently corrupts a student's counts and the class averages, and does so
+    # NON-deterministically (observed live: one student's attendance flipped 60.0%<->61.9% between
+    # runs). Ordering by the PK (run_id is already fixed by .eq) gives a total, stable order so every
+    # row is returned exactly once. PK(marks)=(run_id,student_id,course_id,kind,component_label);
+    # PK(attendance_sessions)=(run_id,student_id,course_id,session_key).
     marks = paged(lambda off, lim: (
         c.table("marks").select("student_id,course_id,kind,component_label,obtained_score,max_score")
         .eq("run_id", run_id).in_("course_id", cids).eq("graded", True)
+        .order("student_id").order("course_id").order("kind").order("component_label")
         .range(off, off + lim - 1).execute()).data or [])
     att = paged(lambda off, lim: (
         c.table("attendance_sessions").select("student_id,course_id,status_norm")
         .eq("run_id", run_id).in_("course_id", cids)
+        .order("student_id").order("course_id").order("session_key")
+        .range(off, off + lim - 1).execute()).data or [])
+    # End-term rows are fetched separately: kind "ET" carries an obtained score but a NULL max,
+    # so the "graded"/"max_score > 0" CE filter below would drop them. Scored against ENDTERM_MAX.
+    et_rows = paged(lambda off, lim: (
+        c.table("marks").select("student_id,course_id,kind,component_label,obtained_score")
+        .eq("run_id", run_id).in_("course_id", cids).eq("kind", "ET")
+        .order("student_id").order("course_id").order("kind").order("component_label")
         .range(off, off + lim - 1).execute()).data or [])
 
     # scored components only: both obtained and max present, max > 0
@@ -159,17 +182,37 @@ def main():
         if t:
             att_class[cid].append(100.0 * p_ / t)
 
+    et_obt = {}                                             # (cid, sid) -> end-term obtained
+    for r in et_rows:
+        o = r.get("obtained_score")
+        if isinstance(o, (int, float)):
+            et_obt[(r["course_id"], r["student_id"])] = o
+    et_class = defaultdict(list)                            # cid -> [per-student end-term pct]
+    for (cid, _sid), o in et_obt.items():
+        et_class[cid].append(100.0 * o / ENDTERM_MAX)
+
     subjects = []
     for cid, meta in tri.items():
         mine = per_student_subject.get((cid, a.student))
         if not mine or not mine[1]:
             continue
         my_att = att_counts.get((cid, a.student))
-        comps = [{"component": m["component_label"], "kind": m["kind"],
+        # Continuous components. kind is normalised to "CE" (the kit's rule: everything that is
+        # not the end-term total is continuous) and obtained/max are carried as o/x, because the
+        # v8 renderer recomputes the continuous-vs-end-term split from o/x (build_report_v5.so_what)
+        # and the assignment-wise marks PDF prints them (make_inputs.marks_pdf).
+        comps = [{"component": m["component_label"], "kind": "CE",
                   "you_pct": pct(m["obtained_score"], m["max_score"]),
                   "class_pct": round(sum(comp_class[(cid, m["kind"], m["component_label"])]) /
-                                     len(comp_class[(cid, m["kind"], m["component_label"])]), 1)}
+                                     len(comp_class[(cid, m["kind"], m["component_label"])]), 1),
+                  "o": m["obtained_score"], "x": m["max_score"]}
                  for m in sorted(my_comps.get(cid, []), key=lambda x: x["component_label"])]
+        my_et = et_obt.get((cid, a.student))                # end-term, scored out of ENDTERM_MAX
+        if my_et is not None:
+            comps.append({"component": "End-term exam", "kind": "ET",
+                          "you_pct": round(100.0 * my_et / ENDTERM_MAX, 1),
+                          "class_pct": round(sum(et_class[cid]) / len(et_class[cid]), 1) if et_class[cid] else None,
+                          "o": my_et, "x": ENDTERM_MAX})
         subject = clean_subject(meta["course_name"])
         subjects.append({
             "subject": subject, "track": track_of(subject),
