@@ -13,7 +13,7 @@ redis>=5.0,<6
 uvicorn>=0.30
 # Floor Starlette at 0.40 for CVE-2024-47874 (unbounded multipart/form-data -> memory DoS);
 # fastmcp 4.x pulls it higher in practice, but make the security floor explicit.
-starlette>=0.40
+starlette>=1.9.0
 # cryptography is a FIRST-PARTY import (oauth_storage.py Fernet/MultiFernet token-store
 # encryption), so pin it explicitly instead of inheriting a floating transitive version.
 cryptography>=43
