@@ -46,7 +46,7 @@ import { Container, getContainer } from "@cloudflare/containers";
 
 export class MoodleMcp extends Container {
   defaultPort = 8080;      // matches EXPOSE/uvicorn above
-  sleepAfter = "20m";      // keep warm-ish to protect the <2s cold-start criterion
+  sleepAfter = "20m";      // stays resident to protect the <2s cold-start criterion
 }
 
 export default {

@@ -24,8 +24,8 @@ Worker + a single container instance — **zero rewrite** of the OAuth / RBAC / 
 - **Real client IP**: the app records source IP and rate-limits off the **rightmost** `X-Forwarded-For`
   (`MCP_TRUST_PROXY_HEADERS=true`). The Worker sets `X-Forwarded-For` to the single `CF-Connecting-IP`
   so per-user IP capture + per-IP flood limits keep working.
-- **Warm start** for the `<2s` cold-`initialize` criterion: long `sleepAfter` + a keepalive cron on
-  `/health` (reuse the existing 10-min health cron pattern).
+- **Warm start** for the `<2s` cold-`initialize` criterion: a long `sleepAfter` keeps the single
+  instance resident (no external pinger or scheduled cron is used).
 - **Issuer**: `MCP_SERVER_BASE_URL=https://moodle-mcp.rehearsal-os.app` (no trailing slash) is a `var`;
   the app's `config.py` validator already strips a stray slash, so the `.issuer` acceptance check passes.
 
@@ -112,4 +112,4 @@ curl -s https://moodle-mcp.rehearsal-os.app/.well-known/oauth-authorization-serv
 - The authenticated Cloudflare profile must belong to Jaipuria and own account
   `c945945018f732e5607a331ef73c7d75`; never authorize the old Synlex profile.
 - Confirm the Workers plan supports Containers and that `standard-1`, `max_instances: 1`, and the
-  keepalive meet the measured concurrency and cold-start SLO.
+  `sleepAfter` setting meet the measured concurrency and cold-start SLO.

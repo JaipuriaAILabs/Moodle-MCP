@@ -146,11 +146,10 @@ Notes:
   it authorized with. `oauth_compat.TolerantGoogleProvider` accepts that exchange
   when the code is PKCE-bound (verifier, redirect_uri, expiry, single-use all still
   enforced by the framework); codes without PKCE keep the strict client check.
-- **Keep-warm**: `.github/workflows/keep-warm.yml` pings `/health` every ~10 min so
-  the free Render instance rarely spins down (cold starts + in-memory OAuth state
-  loss become rare). If the server does restart, issued tokens stay valid
-  (`OAUTH_JWT_SIGNING_KEY`), and a user whose refresh fails is simply sent through
-  Google sign-in again.
+- **Always-on**: the service runs on a paid always-on plan, so it does not spin down
+  (no cold starts, no in-memory OAuth state loss). If the server does restart, issued
+  tokens stay valid (`OAUTH_JWT_SIGNING_KEY`), and a user whose refresh fails is simply
+  sent through Google sign-in again.
 
 ## F. Roll out the Codex plugin to the team
 
