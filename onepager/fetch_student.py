@@ -39,6 +39,12 @@ DEFAULT_TRACK = "General management"
 STORE = {"ios": "https://apps.apple.com/in/app/try-rehearsal-ai/id6762619041",
          "android": "https://play.google.com/store/apps/details?id=ai.rehearsal.app"}
 
+# The end-term (kind "ET" / "__total__") row is stored with a NULL max_score (see
+# tools/students.py), so its percentage can only be computed against a fixed denominator.
+# The programme convention is an end-term out of 40 (matches the kit's make_inputs.to_data);
+# override per cohort with REPORT_ENDTERM_MAX if a batch/trimester uses a different maximum.
+ENDTERM_MAX = float(os.environ.get("REPORT_ENDTERM_MAX", "40"))
+
 
 def client():
     url = os.environ.get("SUPABASE_URL", "")
@@ -124,6 +130,12 @@ def main():
         c.table("attendance_sessions").select("student_id,course_id,status_norm")
         .eq("run_id", run_id).in_("course_id", cids)
         .range(off, off + lim - 1).execute()).data or [])
+    # End-term rows are fetched separately: kind "ET" carries an obtained score but a NULL max,
+    # so the "graded"/"max_score > 0" CE filter below would drop them. Scored against ENDTERM_MAX.
+    et_rows = paged(lambda off, lim: (
+        c.table("marks").select("student_id,course_id,kind,component_label,obtained_score")
+        .eq("run_id", run_id).in_("course_id", cids).eq("kind", "ET")
+        .range(off, off + lim - 1).execute()).data or [])
 
     # scored components only: both obtained and max present, max > 0
     scored = [m for m in marks
@@ -159,17 +171,37 @@ def main():
         if t:
             att_class[cid].append(100.0 * p_ / t)
 
+    et_obt = {}                                             # (cid, sid) -> end-term obtained
+    for r in et_rows:
+        o = r.get("obtained_score")
+        if isinstance(o, (int, float)):
+            et_obt[(r["course_id"], r["student_id"])] = o
+    et_class = defaultdict(list)                            # cid -> [per-student end-term pct]
+    for (cid, _sid), o in et_obt.items():
+        et_class[cid].append(100.0 * o / ENDTERM_MAX)
+
     subjects = []
     for cid, meta in tri.items():
         mine = per_student_subject.get((cid, a.student))
         if not mine or not mine[1]:
             continue
         my_att = att_counts.get((cid, a.student))
-        comps = [{"component": m["component_label"], "kind": m["kind"],
+        # Continuous components. kind is normalised to "CE" (the kit's rule: everything that is
+        # not the end-term total is continuous) and obtained/max are carried as o/x, because the
+        # v8 renderer recomputes the continuous-vs-end-term split from o/x (build_report_v5.so_what)
+        # and the assignment-wise marks PDF prints them (make_inputs.marks_pdf).
+        comps = [{"component": m["component_label"], "kind": "CE",
                   "you_pct": pct(m["obtained_score"], m["max_score"]),
                   "class_pct": round(sum(comp_class[(cid, m["kind"], m["component_label"])]) /
-                                     len(comp_class[(cid, m["kind"], m["component_label"])]), 1)}
+                                     len(comp_class[(cid, m["kind"], m["component_label"])]), 1),
+                  "o": m["obtained_score"], "x": m["max_score"]}
                  for m in sorted(my_comps.get(cid, []), key=lambda x: x["component_label"])]
+        my_et = et_obt.get((cid, a.student))                # end-term, scored out of ENDTERM_MAX
+        if my_et is not None:
+            comps.append({"component": "End-term exam", "kind": "ET",
+                          "you_pct": round(100.0 * my_et / ENDTERM_MAX, 1),
+                          "class_pct": round(sum(et_class[cid]) / len(et_class[cid]), 1) if et_class[cid] else None,
+                          "o": my_et, "x": ENDTERM_MAX})
         subject = clean_subject(meta["course_name"])
         subjects.append({
             "subject": subject, "track": track_of(subject),

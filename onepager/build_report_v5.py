@@ -16,12 +16,18 @@ g = lambda x: f"{x:g}"
 SHORT = {"Financial Reporting and Analysis": "Financial Reporting", "Organisational Behaviour and Interpersonal Dynamics": "Organisational Behaviour",
          "Critical Reading and Writing": "Critical Reading & Writing"}
 sh = lambda x: SHORT.get(x, x)
-LABEL = {"Finance": "Finance and Economics", "Marketing": "Marketing", "Analytics & Operations": "Analytics and GenAI", "HR & People": "HR and Communication"}
+# Area labels. Must cover every track fetch_student can emit (4 kit tracks + GenAI + General
+# management); .get(t, t) below keeps so_what from raising on any track added later.
+LABEL = {"Finance": "Finance and Economics", "Marketing": "Marketing", "Analytics & Operations": "Analytics and GenAI",
+         "HR & People": "HR and Communication", "GenAI": "GenAI and Technology", "General management": "General Management"}
+_NUMWORD = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight"}
 
 
 def so_what(d, f):
     """Everything the page says, computed from the data (the skill's phases 1-4)."""
     subs = f["subjects"]; m = len(subs); a = len(f["above"]); k = len(f["att_above"])
+    # Advice is for the NEXT trimester, derived from the data (kit T1 -> "Trimester 2", unchanged).
+    nxt = (int(d["trimester"]) + 1) if str(d.get("trimester", "")).strip().isdigit() else "the next trimester"
     # end-term against continuous, as % of the marks available in each part (the trap: totals hide this)
     et = []
     for s in d["subjects"]:
@@ -49,23 +55,23 @@ def so_what(d, f):
     for t in d["tracks"]:
         ts = [s for s in subs if s["track"] == t and s["delta"] is not None]
         if ts:
-            areas.append({"track": t, "label": LABEL[t], "n": len(ts), "you": round(S.mean(s["you_pct"] for s in ts), 1),
+            areas.append({"track": t, "label": LABEL.get(t, t), "n": len(ts), "you": round(S.mean(s["you_pct"] for s in ts), 1),
                           "cls": round(S.mean(s["class_pct"] for s in ts), 1)})
     for x in areas:
         x["d"] = round(x["you"] - x["cls"], 1)
     low = min(areas, key=lambda x: x["d"])
     if low["d"] < 0:
-        rec = f"A good first place for extra study time in Trimester 2 is {low['label']}."
+        rec = f"A good first place for extra study time in Trimester {nxt} is {low['label']}."
         subj = "subject" if low["n"] == 1 else f"{low['n']} subjects"
         why = f"Your {subj} there average {g(low['you'])} marks out of 100, against {g(low['cls'])} for the class, which is {g(abs(low['d']))} points below."
     else:
         below = [x for x in subs if x["delta"] is not None and x["delta"] < 0]
         if below:
             w = min(below, key=lambda x: x["delta"])
-            rec = f"Your marks are above the class in all four areas. The one subject to watch in Trimester 2 is {w['subject']}."
+            rec = f"Your marks are above the class in all {_NUMWORD.get(len(areas), len(areas))} areas. The one subject to watch in Trimester {nxt} is {w['subject']}."
             why = f"Your {g(w['you_pct'])} marks out of 100 there compare with {g(w['class_pct'])} for the class, which is {g(abs(w['delta']))} points below."
         else:
-            rec = "Your marks are above the class in all four areas, so Trimester 2 can follow your current routine."
+            rec = f"Your marks are above the class in all {_NUMWORD.get(len(areas), len(areas))} areas, so Trimester {nxt} can follow your current routine."
             why = f"The smallest lead is in {low['label']}: {g(low['you'])} marks out of 100 against {g(low['cls'])} for the class, {g(low['d'])} points ahead."
     pieces = sum(len(s["components"]) for s in d["subjects"])
     mean_you = round(S.mean(s["you_pct"] for s in subs), 1); mean_cls = round(S.mean(s["class_pct"] for s in subs), 1)

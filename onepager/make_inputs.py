@@ -19,16 +19,30 @@ TYPES = {"JN00MB001": "1-good-marks-good-attendance", "JN00MB002": "2-good-marks
 TRACK = {"Financial Reporting and Analysis": "Finance", "Managerial Economics": "Finance", "Marketing Management-I": "Marketing",
          "Statistics for Management": "Analytics & Operations", "GenAI for Managers": "Analytics & Operations",
          "Organisational Behaviour and Interpersonal Dynamics": "HR & People", "Critical Reading and Writing": "HR & People"}
-LABEL = {"Finance": "Finance and Economics", "Marketing": "Marketing", "Analytics & Operations": "Analytics and GenAI", "HR & People": "HR and Communication"}
+# Track copy. The kit cohort used 4 tracks; fetch_student (the dynamic path) can also emit
+# "GenAI" and "General management" (see fetch_student.TRACK_RULES / DEFAULT_TRACK). Every track a
+# subject can land in must have an entry here, and each HABIT must start with a verb in GER (the
+# action line is reshaped through GER in llm_cards). DEFAULT_* is a never-KeyError fallback for any
+# track added to fetch_student later; its habit also starts with a GER verb.
+LABEL = {"Finance": "Finance and Economics", "Marketing": "Marketing", "Analytics & Operations": "Analytics and GenAI",
+         "HR & People": "HR and Communication", "GenAI": "GenAI and Technology", "General management": "General Management"}
 HABIT = {"Finance": "solve one past quiz or case every week and past end-term questions before the exam",
          "Marketing": "make a one-page summary after each topic and revise it before the end-term",
          "Analytics & Operations": "write your steps before starting each individual assignment and solve past end-term problems before the exam",
-         "HR & People": "read your notes for ten minutes before every class and revise them before the end-term"}
-GER = {"solve": "solving", "make": "making", "write": "writing", "read": "reading", "revise": "revising"}
+         "HR & People": "read your notes for ten minutes before every class and revise them before the end-term",
+         "GenAI": "solve one small GenAI or tool exercise every week and past end-term questions before the exam",
+         "General management": "read your notes for ten minutes after every class and revise them before the end-term"}
+GER = {"solve": "solving", "make": "making", "write": "writing", "read": "reading", "revise": "revising", "practise": "practising"}
 END = {"Finance": "you can say you now practise past quizzes, cases and end-term questions.",
        "Marketing": "you can say you now summarise each topic and revise before the end-term.",
        "Analytics & Operations": "you can say you now plan your steps first and practise past end-term problems.",
-       "HR & People": "you can say you now read your notes before class and revise before the end-term."}
+       "HR & People": "you can say you now read your notes before class and revise before the end-term.",
+       "GenAI": "you can say you now practise GenAI and tool exercises and past end-term problems.",
+       "General management": "you can say you now read your notes after class and revise before the end-term."}
+# Fallback for any track not listed above (keeps the pipeline from ever raising KeyError).
+DEFAULT_LABEL = lambda t: t
+DEFAULT_HABIT = "revise your notes each week and practise past end-term questions before the exam"
+DEFAULT_END = "you can say you now revise regularly and practise before the end-term."
 clean_subj = lambda s: re.sub(r"_(GR\d+|[A-Z])$", "", s)
 def clean_comp(c):
     c = re.sub(r"\s+", " ", c.strip().rstrip(":").strip()); c = re.sub(r"^Quiz(\d)", r"Quiz \1", c); return c
@@ -65,7 +79,7 @@ def llm_cards(d, f):
         comps = [c for c in f["components"] if c["track"] == t]
         nonq = [c for c in comps if not re.search(r"quiz|mcq|\btest|end-term", c["component"], re.I)]
         talk = max(nonq, key=lambda c: (c["you_pct"], c["delta"])) if nonq else None
-        tracks.append({"area": t, "label": LABEL[t], "habit": HABIT[t], "subjects": [s["subject"] for s in d["subjects"] if s["track"] == t],
+        tracks.append({"area": t, "label": LABEL.get(t, DEFAULT_LABEL(t)), "habit": HABIT.get(t, DEFAULT_HABIT), "subjects": [s["subject"] for s in d["subjects"] if s["track"] == t],
                        "talk_about": talk and {"subject": talk["subject"], "component": talk["component"]},
                        "components": [{"subject": c["subject"], "component": c["component"], "you_pct": c["you_pct"], "class_pct": c["class_pct"]} for c in comps]})
     allowed = {float(x) for tr in tracks for c in tr["components"] for x in (c["you_pct"], c["class_pct"])}
@@ -118,7 +132,7 @@ Return ONLY a JSON object {{"tracks":[...]}} with {len(tracks)} items in the sam
         t["label"] = tr["label"]; t["action"] = "You can try " + act + "."
         t["why"] = fmt(t["why"])
         t["interview"] = fmt(t["interview"].replace("Talk about", "You can talk about", 1))
-        t["interview"] = re.sub(r"If (they|you are|asked)[^.]*weak areas,.*$", "", t["interview"]).strip() + " If asked about weak areas, " + END[tr["area"]]
+        t["interview"] = re.sub(r"If (they|you are|asked)[^.]*weak areas,.*$", "", t["interview"]).strip() + " If asked about weak areas, " + END.get(tr["area"], DEFAULT_END)
     # DPDP safety net: the card templates never use the name, but if the model echoed the pseudonym,
     # swap it back to the real first name (word-bounded), mirroring build_report.stitch_name.
     _pat = re.compile(rf"\b{re.escape(BR.PSEUDONYM)}\b")
@@ -132,7 +146,10 @@ def narrative(d, f, first):
     if kind == "split": txt = "You attended more than the class in this subject, but your marks were lower."
     elif kind == "strength": txt = "This is the subject where your marks are furthest ahead of the class."
     else: txt = "Your attendance and your marks were both below the class in this subject." if (pt["att_you"] or 0) < (pt["att_class"] or 0) else "You attended as much as the class or more, but your marks were below the class."
-    return {"headline": f"Hi {first}. Here is how you did in Trimester 1.", "subtitle": f"This report compares your Trimester 1 performance with your class in Noida, batch {d['student']['batch']}.",
+    # Campus and trimester come from the data (fetch_student / to_data both set them), not a literal,
+    # so the headline/subtitle are correct for any cohort, not just the Noida-T1 sample.
+    camp = d["student"].get("campus") or "your campus"; trim = str(d.get("trimester") or "")
+    return {"headline": f"Hi {first}. Here is how you did in Trimester {trim}.", "subtitle": f"This report compares your Trimester {trim} performance with your class in {camp}, batch {d['student']['batch']}.",
             "attendance_line": f"You attended at or above class average in {k} of {m} subjects.", "pattern_text": txt, "_model": MODEL}
 
 def pdf(html, out):
@@ -158,27 +175,41 @@ def marks_pdf(d, base):
 h1{{font-size:24px;margin:6px 0 2px;font-weight:600}} .lede{{margin:0 0 10px}} h2{{font-size:17px;margin:12px 0 1px;font-weight:600}} .sub{{margin:0 0 4px}} section{{break-inside:avoid}}
 table{{border-collapse:collapse;width:100%}} th,td{{text-align:left;padding:3px 6px 3px 0;border-bottom:1px solid #cfcfc8;vertical-align:top}} th{{font-weight:600;border-bottom:2px solid #0b0b0b}} .n{{text-align:right;white-space:nowrap;padding-right:14px}} .foot{{margin-top:10px;border-top:1px solid #cfcfc8;padding-top:6px}}</style>
 <div class=top><img src="data:image/png;base64,{logo}"><span>Rehearsal</span></div><h1>{st['name']}: your marks, assignment by assignment</h1>
-<p class=lede>{st['campus']}, {st['batch'].replace('-', ' to 20')}. Trimester {TRIMESTER}. Data taken on {DATA_DATE}. Each line shows your marks for one assignment or quiz next to your class average.</p>{blocks}
+<p class=lede>{st['campus']}, {st['batch'].replace('-', ' to 20')}. Trimester {d.get('trimester', TRIMESTER)}. Data taken on {d.get('data_date', DATA_DATE)}. Each line shows your marks for one assignment or quiz next to your class average.</p>{blocks}
 <p class=foot>Total marks are out of 100: continuous marks plus the end-term exam (out of 40). Subjects without an end-term line have continuous marks only, out of 100. Class average is your own class section. This page is for your information and does not predict placement results.</p>"""
     open(base + "-marks.html", "w").write(html); pdf(base + "-marks.html", base + "-marks.pdf")
 
 
+def _process(d, sid):
+    """facts -> narrative -> number-checked LLM cards -> write data.json/narrative.json + marks PDF.
+    Build everything BEFORE writing, so a failed student leaves no partial data/narrative and never
+    ships a report (no narrative.json -> build_report_v8 skips it)."""
+    first = d["student"]["name"].split()[0]; base = f"{WORK}/{sid}"
+    f = B.facts(d); n = narrative(d, f, first); n["tracks"] = llm_cards(d, f)
+    json.dump(d, open(base + "-data.json", "w"), indent=1)
+    json.dump(n, open(base + "-narrative.json", "w"), indent=1)
+    marks_pdf(d, base); os.replace(base + "-marks.pdf", f"{OUT}/{sid}-marks-assignment-wise.pdf")
+    return d["student"]["name"]
+
+
 if __name__ == "__main__":
-    raw = json.load(open(RAW)); only = sys.argv[1:]
+    argv = sys.argv[1:]
+    # DYNAMIC path: `make_inputs.py --from-data work/<id>-data.json ...` consumes data.json files
+    # already produced by fetch_student.py (real Supabase data), skipping the fixed-kit RAW+to_data
+    # step. DEFAULT (no flag): read the kit fixture and map it through to_data() -- unchanged.
+    if "--from-data" in argv:
+        _loaded = [json.load(open(p)) for p in argv[argv.index("--from-data") + 1:]]
+        items = [(d["student"]["id"], d, False) for d in _loaded]
+    else:
+        raw = json.load(open(RAW)); only = argv
+        items = [(st["id"], st, True) for st in raw if not only or st["id"] in only]
     failures = []
-    for st in raw:
-        if only and st["id"] not in only: continue
+    for sid, src, is_raw in items:
         try:
-            # Build everything BEFORE writing, so a failed student leaves no partial data/narrative
-            # and never ships a report (no narrative.json -> build_report_v8 skips it).
-            d = to_data(st); first = d["student"]["name"].split()[0]; base = f"{WORK}/{st['id']}"
-            f = B.facts(d); n = narrative(d, f, first); n["tracks"] = llm_cards(d, f)
-            json.dump(d, open(base + "-data.json", "w"), indent=1)
-            json.dump(n, open(base + "-narrative.json", "w"), indent=1)
-            marks_pdf(d, base); os.replace(base + "-marks.pdf", f"{OUT}/{st['id']}-marks-assignment-wise.pdf")
-            print(st["id"], d["student"]["name"], "ok")
+            d = to_data(src) if is_raw else src   # to_data stays inside the try: it may raise on an
+            print(sid, _process(d, sid), "ok")     # unknown subject, and must skip only that student
         except Exception as e:
-            failures.append(st["id"]); print(f"{st['id']} FAILED ({type(e).__name__}): {e} -- no report written")
+            failures.append(sid); print(f"{sid} FAILED ({type(e).__name__}): {e} -- no report written")
     if failures:
         print(f"\n{len(failures)} student(s) skipped: {failures}. No flawed report was shipped; "
               "fix the cause or re-run those ids.")

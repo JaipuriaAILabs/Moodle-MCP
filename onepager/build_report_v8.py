@@ -18,6 +18,11 @@ def render(d, f, n, sw):
     att = [{"label": sh(s["subject"]), "value": s["att_you"], "target": s["att_class"], "color": "var(--s3)" if s["att_you"] >= s["att_class"] else "var(--s2)",
             "display": f"{g(s['att_you'])}%"} for s in f["att"]]
     et = [{"label": sh(x["subject"]), "a": x["ce"], "b": x["et"], "color": "var(--s1)", "display": f"{g(x['et'])}% vs {g(x['ce'])}%"} for x in sw["et"]]
+    # Which subjects have no end-term, named from the data (not a fixed Noida-T1 literal).
+    _et_subjects = {x["subject"] for x in sw["et"]}
+    _no_et = [s["subject"] for s in d["subjects"] if s["subject"] not in _et_subjects]
+    no_et_note = (" " + (", ".join(_no_et[:-1]) + " and " + _no_et[-1] if len(_no_et) > 1 else _no_et[0])
+                  + (" has" if len(_no_et) == 1 else " have") + " no end-term.") if _no_et else ""
     dm = round(sw["mean_you"] - sw["mean_cls"], 1)
     tiles = [{"label": "Average mark out of 100", "value": g(sw["mean_you"]), "delta": dm, "deltaUnit": " points above the class" if dm >= 0 else " points below the class", "note": f"Class average {g(sw['mean_cls'])}"},
              {"label": "Subjects above the class", "value": f"{sw['a']} of {sw['m']}"},
@@ -83,7 +88,7 @@ h2{{font-size:22px;font-weight:600;margin:6px 0 2px}}
  <div class="strip"><div><b>Student</b>{esc(st['name'])}</div><div><b>Campus and batch</b>{esc(st['campus'])}, {esc(st['batch'].replace('-', ' to 20'))}</div><div><b>Report period</b>Trimester {esc(d['trimester'])}</div><div><b>Data taken on</b>{esc(d['data_date'])}</div></div>
  <p class="rec">{esc(sw['rec'])}<span>{esc(sw['why'])}</span></p>
  <div class="panel fig"><p class="t">Your marks against the class, subject by subject</p><div class="chart" id="ch-marks"></div></div>
- <div class="panel fig"><p class="t">Continuous marks against end-term marks</p><div class="chart" id="ch-et"></div><p class="sub">Hollow dots are continuous marks, filled dots are end-term, each as a share of the marks available. GenAI for Managers and Critical Reading and Writing have no end-term.</p></div>
+ <div class="panel fig"><p class="t">Continuous marks against end-term marks</p><div class="chart" id="ch-et"></div><p class="sub">Hollow dots are continuous marks, filled dots are end-term, each as a share of the marks available.{no_et_note}</p></div>
  <div class="foot"><span>Source: Moodle gradebook, Jaipuria {esc(st['campus'])}. Marks are out of 100. This report guides learning and does not predict placement results.</span></div>
 </div>
 <div class="page p2">
