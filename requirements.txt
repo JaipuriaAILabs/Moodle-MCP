@@ -4,7 +4,7 @@
 # 4.x note: ToolResult moved to fastmcp.tools.base (import via the fastmcp.tools facade);
 # mcp 2.x renamed the mimeType field to mime_type on reads (construction with mimeType= is
 # still accepted on both mcp 1.x and 2.x, so server.py/mcp_ui.py are unchanged).
-fastmcp==4.1.1
+fastmcp==4.1.2
 supabase>=2.5.0
 pydantic>=2.13.5
 pydantic-settings>=2.16.0
