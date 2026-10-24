@@ -83,6 +83,13 @@ def llm_cards(d, f):
                        "talk_about": talk and {"subject": talk["subject"], "component": talk["component"]},
                        "components": [{"subject": c["subject"], "component": c["component"], "you_pct": c["you_pct"], "class_pct": c["class_pct"]} for c in comps]})
     allowed = {float(x) for tr in tracks for c in tr["components"] for x in (c["you_pct"], c["class_pct"])}
+    # Component labels and subject names are copied verbatim from FACTS and can carry numbers that are
+    # NOT percentages ("CO 1 - Quiz 1", "CO 2 - Quiz 2", "Assignment 1(Max of two)"). Strip those exact
+    # names from the text before number-checking, longest-first, so only the % figures the model wrote
+    # are validated against `allowed` (otherwise a label's "1"/"2" false-fails the number check).
+    _label_names = sorted({c["component"] for tr in tracks for c in tr["components"]}
+                          | {c["subject"] for tr in tracks for c in tr["components"]}
+                          | {s for tr in tracks for s in tr["subjects"]}, key=len, reverse=True)
     def prompt(fb=None):
         p = f"""You write the "next trimester" advice for {first}, an MBA student in India, in an end-of-trimester report.
 Tone: a friendly senior speaking to the student. Conversational, simple Indian English, short sentences (max 18 words), everyday words. Address the student as "you" and "your". No jargon, no metaphors, no em-dashes, no exclamation marks, no praise words.
@@ -109,7 +116,11 @@ Return ONLY a JSON object {{"tracks":[...]}} with {len(tracks)} items in the sam
             if re.search(r"_[A-Z]\b|—|–|!", txt): pr.append(f"{t['track']}: remove _D/_B suffixes, dashes, exclamation marks")
             if re.search(r"did not (attempt|submit)|didn't (attempt|submit)|re-?do|re-?submit|re-?take|perfect|great|amazing|\bhis\b|\bher\b", txt, re.I): pr.append(f"{t['track']}: banned wording")
             if re.search(r"\d", t["action"]): pr.append(f"{t['track']}: no digits in action")
-            for m in re.findall(r"\d+(?:\.\d+)?", re.sub(r"Quiz \d|Assignment \d|Phase \d|\bA\d\b|-I\b|1&2", "", t["why"])):
+            _why = t["why"]
+            for _nm in _label_names:        # remove exact component/subject names (may contain numbers)
+                _why = _why.replace(_nm, " ")
+            _why = re.sub(r"Quiz \d|Assignment \d|Phase \d|\bA\d\b|-I\b|1&2", "", _why)
+            for m in re.findall(r"\d+(?:\.\d+)?", _why):
                 if float(m) not in allowed: pr.append(f"{t['track']}: number {m} not in facts")
             if t["why"].count("%") < 4: pr.append(f"{t['track']}: every mark needs a % sign")
             if len(t["why"].split()) > 62: pr.append(f"{t['track']}: why too long, max 55 words")

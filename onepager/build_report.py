@@ -266,14 +266,14 @@ def gateway_text(messages, model, response_schema=None):
     Added so the v8 card stage (make_inputs.llm_cards) reuses this exact TrueFoundry path; the v3
     llm_narrative transport below is left unchanged.
     """
-    def _call(with_schema):
+    def _call(use_model, with_schema):
         _validate_truefoundry()
         # max_tokens bounds reasoning models (e.g. gemini-flash-latest emits reasoning tokens): with
         # no cap they exhaust the provider budget and return null content. Covers reasoning + the JSON.
         # reasoning:low — gemini-flash-latest is a thinking model; unbounded reasoning eats the whole
         # token budget and truncates (finish=length, null/partial content). Low effort returns the JSON
         # directly. OpenRouter-compatible; harmless for non-reasoning models.
-        body = {"model": model, "temperature": 0.4, "stream": False, "max_tokens": 6000,
+        body = {"model": use_model, "temperature": 0.4, "stream": False, "max_tokens": 6000,
                 "reasoning": {"effort": "low"}, "messages": messages}
         if with_schema and response_schema:
             body["response_format"] = {"type": "json_schema", "json_schema": {"name": "report", "strict": True, "schema": response_schema}}
@@ -281,8 +281,10 @@ def gateway_text(messages, model, response_schema=None):
             # Route through the TFY AI Gateway so its PII guardrail runs on the request. OpenAI-
             # compatible; the gateway holds the provider key. One-way backstop for email/phone/gov-IDs
             # — the person name is kept out by the caller's pseudonym, not the gateway.
+            # NOTE: body["model"] stays as use_model (this attempt's model in the fallback chain).
+            # It is NOT forced to TRUEFOUNDRY_MODEL here — doing so collapsed every fallback back to
+            # the same model, so a model/provider failure had no real fallback.
             url = _env("TRUEFOUNDRY_BASE_URL").rstrip("/") + "/chat/completions"
-            body["model"] = _env("TRUEFOUNDRY_MODEL") or model
             headers = {"Content-Type": "application/json",
                        "Authorization": f"Bearer {_env('TRUEFOUNDRY_API_KEY')}",
                        # Browser-like UA so the gateway's Cloudflare edge does not block the default
@@ -327,13 +329,47 @@ def gateway_text(messages, model, response_schema=None):
             _log_tfy(hdrs, data)
         return data
 
-    try:
-        r = _call(True)
-        txt = r["choices"][0]["message"]["content"].strip()
-    except urllib.error.HTTPError:
-        r = _call(False)
-        txt = r["choices"][0]["message"]["content"].strip()
-    return re.sub(r"^```(?:json)?\s*|\s*```$", "", txt), r.get("usage", {})
+    def _content(data):
+        try:
+            return (data["choices"][0]["message"].get("content") or "").strip()
+        except (KeyError, IndexError, TypeError, AttributeError):
+            return ""
+
+    # Real model fallback chain. Primary model, then TRUEFOUNDRY_FALLBACK_MODELS (DeepSeek V3, then a
+    # cheap OpenAI model) are each tried IN ORDER on ANY failure: HTTP error, connection/SSL drop,
+    # timeout, or empty/null content (a reasoning blow-up). A transient connection/SSL drop on one
+    # model gets one quick retry before moving on. Every attempt still goes through the SAME TFY
+    # gateway, so the guardrails run on each model. Set TRUEFOUNDRY_FALLBACK_MODELS to the exact
+    # slugs available in your TFY catalog (empty string disables fallback).
+    primary = (_env("TRUEFOUNDRY_MODEL") if _truefoundry_enabled() else "") or model
+    fb_raw = _env("TRUEFOUNDRY_FALLBACK_MODELS")
+    if fb_raw is None:
+        fb_raw = "openrouter/deepseek/deepseek-chat,openrouter/openai/gpt-4o-mini"
+    chain, seen = [], set()
+    for m in [primary] + [x.strip() for x in fb_raw.split(",") if x.strip()]:
+        if m and m not in seen:
+            seen.add(m); chain.append(m)
+    errors = []
+    for idx, use_model in enumerate(chain):
+        for attempt in range(2):  # one retry on a transient connection/SSL drop for the same model
+            try:
+                try:
+                    r = _call(use_model, True)
+                except urllib.error.HTTPError:
+                    r = _call(use_model, False)  # model/gateway rejected the json_schema -> retry plain
+                txt = _content(r)
+                if not txt:
+                    raise ValueError("empty/null content")
+                if idx or attempt:
+                    print(f"[gateway] fell back to model={use_model} (attempt {attempt+1})", file=sys.stderr)
+                return re.sub(r"^```(?:json)?\s*|\s*```$", "", txt), r.get("usage", {})
+            except urllib.error.HTTPError as e:   # plain call also 4xx/5xx -> next model
+                errors.append(f"{use_model}: HTTP {e.code}"); break
+            except urllib.error.URLError as e:    # connection/SSL/timeout -> retry this model once
+                errors.append(f"{use_model} a{attempt+1}: {type(e).__name__}"); continue
+            except Exception as e:  # noqa: BLE001 — empty content / parse -> next model
+                errors.append(f"{use_model}: {type(e).__name__}"); break
+    raise RuntimeError("all report models failed: " + "; ".join(errors[-6:]))
 
 
 def llm_narrative(d, f, model, feedback=None):
