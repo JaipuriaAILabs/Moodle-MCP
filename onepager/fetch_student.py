@@ -122,19 +122,30 @@ def main():
         sys.exit(f"student {a.student} not in run for {a.campus}/{a.batch}")
     name = " ".join(w.capitalize() for w in (stu[0].get("student_name") or a.student).split())
 
+    # STABLE PAGINATION: every paged query MUST order by its full primary key. PostgREST range()
+    # paging over an unordered result set has no guaranteed row order between successive requests,
+    # so across the ~37 pages of a cohort's marks/attendance a boundary row can be returned twice
+    # (or skipped) — which silently corrupts a student's counts and the class averages, and does so
+    # NON-deterministically (observed live: one student's attendance flipped 60.0%<->61.9% between
+    # runs). Ordering by the PK (run_id is already fixed by .eq) gives a total, stable order so every
+    # row is returned exactly once. PK(marks)=(run_id,student_id,course_id,kind,component_label);
+    # PK(attendance_sessions)=(run_id,student_id,course_id,session_key).
     marks = paged(lambda off, lim: (
         c.table("marks").select("student_id,course_id,kind,component_label,obtained_score,max_score")
         .eq("run_id", run_id).in_("course_id", cids).eq("graded", True)
+        .order("student_id").order("course_id").order("kind").order("component_label")
         .range(off, off + lim - 1).execute()).data or [])
     att = paged(lambda off, lim: (
         c.table("attendance_sessions").select("student_id,course_id,status_norm")
         .eq("run_id", run_id).in_("course_id", cids)
+        .order("student_id").order("course_id").order("session_key")
         .range(off, off + lim - 1).execute()).data or [])
     # End-term rows are fetched separately: kind "ET" carries an obtained score but a NULL max,
     # so the "graded"/"max_score > 0" CE filter below would drop them. Scored against ENDTERM_MAX.
     et_rows = paged(lambda off, lim: (
         c.table("marks").select("student_id,course_id,kind,component_label,obtained_score")
         .eq("run_id", run_id).in_("course_id", cids).eq("kind", "ET")
+        .order("student_id").order("course_id").order("kind").order("component_label")
         .range(off, off + lim - 1).execute()).data or [])
 
     # scored components only: both obtained and max present, max > 0

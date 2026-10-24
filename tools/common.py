@@ -190,6 +190,13 @@ def paged(query_factory, page: int = 1000, cap: int = 100000):
     return out
 
 
+# STABLE PAGINATION: order every paged query by its full primary key. PostgREST range() paging has
+# no guaranteed row order between successive requests, so across the many pages of a cohort scan a
+# boundary row can be returned twice (or skipped) — silently and NON-deterministically corrupting
+# cohort means/counts (verified live: a student's attendance flipped 60.0%<->61.9% between runs).
+# run_id is already fixed by .eq, so ordering by the remaining PK columns gives a total, stable order
+# (each row returned exactly once). PK(marks)=(run_id,student_id,course_id,kind,component_label);
+# PK(attendance_sessions)=(run_id,student_id,course_id,session_key). The PK index backs the sort.
 def marks_for(svc, run_id, *, student_id=None, course_ids=None):
     def factory(off, lim):
         q = (svc.client.table(MARKS)
@@ -199,7 +206,9 @@ def marks_for(svc, run_id, *, student_id=None, course_ids=None):
             q = q.eq("student_id", student_id)
         if course_ids is not None:
             q = q.in_("course_id", course_ids)
-        return (svc.apply_student(q).range(off, off + lim - 1).execute()).data or []
+        return (svc.apply_student(q)
+                .order("student_id").order("course_id").order("kind").order("component_label")
+                .range(off, off + lim - 1).execute()).data or []
     return paged(factory)
 
 
@@ -211,7 +220,9 @@ def attendance_for(svc, run_id, *, student_id=None, course_ids=None):
             q = q.eq("student_id", student_id)
         if course_ids is not None:
             q = q.in_("course_id", course_ids)
-        return (svc.apply_student(q).range(off, off + lim - 1).execute()).data or []
+        return (svc.apply_student(q)
+                .order("student_id").order("course_id").order("session_key")
+                .range(off, off + lim - 1).execute()).data or []
     return paged(factory)
 
 
