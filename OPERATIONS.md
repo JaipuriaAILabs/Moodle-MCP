@@ -58,14 +58,13 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST \
   https://moodle-mcp.tryrehearsal.ai/mcp                    # 401
 ```
 
-## Keep-warm — measured reality (2026-09-01)
-GitHub schedules `*/10` crons best-effort and throttles them hard on low-activity
-repos: over 2026-08-31 → 09-01 the keep-warm workflow actually ran ~5 times in 21
-hours (gaps of 3-8 hours), so the free instance still spins down and faculty still
-hit ~30-60s cold starts (observed as 9-22s 401/504 responses mid-morning). If cold
-starts matter, use an external pinger (UptimeRobot / cron-job.org, 5-min interval,
-same unauthenticated `/health`) or move the service to a paid always-on plan. The
-Action stays as a harmless backstop.
+## Cold starts
+The service runs on a paid always-on plan, so it does not spin down and faculty do
+not hit cold starts. (There is no scheduled warm-up workflow; a scheduled `*/10`
+cron would be throttled hard on a low-activity repo anyway and is not a reliable
+substitute for an always-on instance.) If the service is ever moved to a free,
+spin-down tier, add an external pinger (UptimeRobot / cron-job.org, 5-min interval,
+same unauthenticated `/health`) rather than relying on a GitHub Actions cron.
 
 ## Env hygiene
 - With OAuth enabled, `MCP_TOKENS` / `MCP_ADMIN_TOKEN` are never consulted on
