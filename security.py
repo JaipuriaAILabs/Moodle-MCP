@@ -921,15 +921,36 @@ def build_middleware(rate_limit: int, window: float):
                     except Exception:  # noqa: BLE001 — success audit must never fail the call
                         log.warning("post-success audit for %s failed", name, exc_info=True)
                     return result
-                except ToolError:
+                except ToolError as exc:
                     # Preserve a specific terminal code (e.g. pii_error) set before the raise;
                     # otherwise this is an ordinary tool error.
                     code = term_code or "tool_error"
+                    # Defense in depth (DPDP / AIA-1356): the ERROR path must not leak student PII any
+                    # more than the success path does. Tool messages are expected to be caller-safe,
+                    # but under redaction we additionally scrub recognisable identifiers (enrolment
+                    # ids, emails, phone/PAN/Aadhaar) from the outgoing message before it reaches the
+                    # client/LLM. enforce replaces the message; shadow only logs (never perturbs
+                    # traffic) — mirroring the success-path policy above. Names in free text are NOT
+                    # caught (the redactor is id/structured-based): tools must still craft safe text.
+                    pii_mode = settings.pii_redaction_mode()
+                    if pii_mode != "off":
+                        try:
+                            import pii as _pii
+                            scrubbed, hits = _pii.redact_text(str(exc), redact_hits=(pii_mode == "enforce"))
+                            if hits:
+                                if pii_mode == "enforce":
+                                    exc = ToolError(scrubbed)
+                                else:
+                                    log.info("pii.shadow tool=%s error_leak=%d", name, hits)
+                        except Exception:  # noqa: BLE001 — a redaction bug must deny, not leak
+                            if pii_mode == "enforce":
+                                log.exception("pii error-text redaction failed for %s — failing closed", name)
+                                exc = ToolError(MSG_ERROR)
                     await record_tool_call(tool=name, principal=principal, ok=False,
                                            started=started, headers=headers,
                                            scope=_scope(context, principal), error_code=code, **cap)
                     err = code
-                    raise  # already a clean, caller-safe message
+                    raise exc  # caller-safe message, PII-scrubbed under enforce
                 except (PydanticValidationError, FastMCPValidationError) as e:
                     # Caller sent bad/missing parameters. Tell them WHICH — this is
                     # their own input, not an internal detail — so an agent can fix
