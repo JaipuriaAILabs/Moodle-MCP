@@ -140,6 +140,23 @@ check("PAN removed", "ABCDE1234F" not in generic_blob and "[PAN]" in generic_blo
 check("Aadhaar removed", "1234 5678 9012" not in generic_blob and "[AADHAAR]" in generic_blob)
 check("generic identifiers counted", generic_stats["leak"] == 3)
 
+print("\n[ redact_text: error-path PII scrub (defense in depth for tool errors) ]")
+ERR = ("Multiple students match 'Sharma'. candidates: Rahul Sharma (JN25MM002, noida/2025-27); "
+       "contact rahul.sharma@jaipuria.ac.in or 9876543210.")
+enforced, ehits = pii.redact_text(ERR)                      # enforce: redact_hits defaults True
+check("enforce scrubs enrolment id from error text", "JN25MM002" not in enforced and "[STUDENT_ID]" in enforced)
+check("enforce scrubs email from error text", "rahul.sharma@jaipuria.ac.in" not in enforced and "[EMAIL]" in enforced)
+check("enforce scrubs phone from error text", "9876543210" not in enforced and "[PHONE]" in enforced)
+check("error-text hits counted (id+email+phone)", ehits == 3)
+shadow, shits = pii.redact_text(ERR, redact_hits=False)     # shadow: count only, never perturb
+check("shadow leaves error text unchanged", shadow == ERR and shits == 3)
+clean, chits = pii.redact_text("Multiple students match that lookup. Ask for the exact enrolment number.")
+check("clean caller-safe error passes through untouched", chits == 0)
+check("non-string/empty input is a no-op", pii.redact_text("") == ("", 0) and pii.redact_text(None) == (None, 0))
+# Honest limitation: the redactor is id/structured-based, so a bare free-text NAME is NOT removed
+# (tools must still craft safe messages). Documented in redact_text() and the security.py backstop.
+check("bare free-text name is NOT removed (known limitation)", "Rahul Sharma" in enforced)
+
 config.settings.pii_hmac_key = ""
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

@@ -263,6 +263,21 @@ def _redact_value(obj, idmap, name_re, name_lookup, emails, stats, redact_hits,
     return obj
 
 
+def redact_text(text: str, *, redact_hits: bool = True):
+    """Scrub recognisable PII from a FREE-TEXT string (e.g. a tool error message) with the same
+    leak-guard patterns as `redact()`: enrolment ids, emails, phone, PAN, Aadhaar. Returns
+    (scrubbed_text, hit_count). `redact_hits=False` counts but leaves the text unchanged (shadow).
+
+    This is the error-path counterpart to `redact()`. It is pattern-based and, like the rest of the
+    redactor, does NOT remove free-text names (identity redaction is id/structured-based by design),
+    so tools must still craft caller-safe error messages; this is defense in depth, not a substitute."""
+    if not isinstance(text, str) or not text:
+        return text, 0
+    stats = {"leak": 0}
+    scrubbed = _leak_guard(text, stats, redact_hits)
+    return scrubbed, stats["leak"]
+
+
 def redact(result, *, redact_hits: bool = True):
     """In-server PII redaction for a tool result (zero-trust: NO `_identity` side-map is produced).
 
